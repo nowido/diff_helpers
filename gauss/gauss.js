@@ -73,15 +73,20 @@ Solver.prototype.findLeadingRow = function(top, left)
     var matrix = solver.matrix;
 
     var leadingRowIndex = -1;
-
+    
+    var maxElement;
+    
     for(var row = top; row < dim; ++row)
     {
         var v = Math.abs(matrix[row * dim + left]);
         
         if(v > 0)
         {
-            leadingRowIndex = row;
-            break;
+            if((leadingRowIndex < 0) || (v > maxElement))
+            {
+                leadingRowIndex = row;    
+                maxElement = v;
+            }
         }
     }
     
