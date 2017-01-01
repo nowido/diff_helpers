@@ -6,7 +6,7 @@
     <body>
         <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
         <script src="glass/glassCore.js"></script>
-        <script src="examples/glassplay.1.js"></script>
+        <script src="examples/glassplay.2.js"></script>
         
         <script type="x-shader/x-fragment" id="commonKernelRoutines">
             
@@ -118,6 +118,16 @@
                 return result / 255.0;
             }
             
+            float readFloat(sampler2D resource, vec2 coords)
+            {
+                return convertUnorm4ToFloat(readInput(resource, coords));
+            }
+            
+            void writeFloat(float fv)
+            {
+                gl_FragColor = convertFloatToUnorm4(fv);    
+            }
+            
         </script>
         
         <script type="x-shader/x-fragment" id="justTransfer">
@@ -137,21 +147,13 @@
             const vec2 addrUnit = vec2(1.0, 1.0) / vec2(WIDTH, HEIGHT);
             const vec2 addrOffset = vec2(0.5, 0.5) * addrUnit;
         
-                //
-                
             void main()
             {
-                    // we have 2D-identity
-                    
                 vec2 id = getThreadId();
                 
-                    //
-                    
-                vec4 val = readInput(matrix, buildAddress(addrOffset, addrUnit, id));
+                float valf = readFloat(matrix, buildAddress(addrOffset, addrUnit, id));
 
-                float valf = convertUnorm4ToFloat(val);
-
-                writeOutput(convertFloatToUnorm4(valf + 0.5)); 
+                writeFloat(valf + 0.5);
             }
             
         </script>
@@ -318,6 +320,97 @@
 
                 writeOutput(res);   
             }
+        </script>
+
+        <script type="x-shader/x-fragment" id="eliminator3">
+            // #define WIDTH
+            // #define HEIGHT
+            
+            // WIDTH is N
+            // HEIGHT is (N + 1)
+            
+                // matrix is augmented with vector and transposed (so vector is last row)
+            
+            uniform highp sampler2D matrix;
+            
+                // 2D-dispatch coord                
+            
+            uniform vec2 leftTop;
+            
+            uniform float leadIndex;
+            
+                // 2D fetch coords helpers
+                
+            const vec2 addrUnit = vec2(1.0, 1.0) / vec2(WIDTH, HEIGHT);
+            const vec2 addrOffset = vec2(0.5, 0.5) * addrUnit;
+
+                //
+                
+            void main()
+            {
+                    // we have 2D-identity
+                    
+                vec2 id = getThreadId();
+                
+                    //
+                
+                bool weAreLeft  = (id.x == leftTop.x);
+                bool weAreTop   = (id.y == leftTop.y);
+                bool weAreLead  = (id.x == leadIndex);
+
+                bool validLead  = (leadIndex >= 0.0);
+
+                bool needSwap   = (leftTop.x != leadIndex) && validLead;
+                
+                    //
+                    
+                vec2 divisorPos;
+                
+                divisorPos.x = needSwap ? (weAreLead ? leftTop.x : (weAreLeft && validLead ? leadIndex : id.x)) : id.x;
+                divisorPos.y = leftTop.y;
+
+                float divisor = readFloat(matrix, buildAddress(addrOffset, addrUnit, divisorPos));
+                    
+                    //
+                    
+                vec2 valuePos;
+
+                valuePos.x = divisorPos.x;  
+                valuePos.y = id.y;
+
+                float value = readFloat(matrix, buildAddress(addrOffset, addrUnit, valuePos));
+
+                    // 
+                
+                vec2 leadValuePos;
+                
+                leadValuePos.x = validLead ? leadIndex : id.x;
+                leadValuePos.y = id.y;
+
+                float leadValue = readFloat(matrix, buildAddress(addrOffset, addrUnit, leadValuePos));
+
+                    //
+                
+                vec2 leadDivisorPos;
+
+                leadDivisorPos.x = leadValuePos.x;  
+                leadDivisorPos.y = leftTop.y;
+
+                float leadDivisor = readFloat(matrix, buildAddress(addrOffset, addrUnit, leadDivisorPos));
+
+                    //
+                
+                float compLead = safeDivide(leadValue, leadDivisor);
+                
+                float comp = safeDivide(value, divisor);
+
+                float res = weAreLeft ? compLead : ((abs(divisor) > 0.0) ? compLead - comp : value);
+
+                    //
+                    
+                writeFloat(res);   
+            }
+            
         </script>
         
     </body>
