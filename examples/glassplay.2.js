@@ -65,15 +65,25 @@ function printAugmentedMatrix(dim, augmentedMatrix)
 
 function findLeadIndex(valuesRow, length)
 {
+    var leadIndex = -1;
+    
+    var maxElement;
+    
     for(var i = 0; i < length; ++i)
     {
-        if(Math.abs(valuesRow[i]) > 0)
+        var el = Math.abs(valuesRow[i]);
+        
+        if(el > 0)
         {
-            return i;
+            if((leadIndex < 0) || (el > maxElement))
+            {
+                leadIndex = i;
+                maxElement = el;
+            }
         }
     }
     
-    return -1;
+    return leadIndex;
 }
 
 //------------------------------------------------------------------------------
@@ -170,16 +180,21 @@ function continueElimination(dim, left, top, augmentedMatrix)
     {
         var leadIndex = -1;
         
+        var maxElement;
+        
         var offset = top * dim;
         
         for(var i = left, index = offset + left; i < dim; ++i, ++index)
         {
-            var m = augmentedMatrix[index];
+            var el = Math.abs(augmentedMatrix[index]);
             
-            if(Math.abs(m) > 0)
+            if(el > 0)
             {
-                leadIndex = i;
-                break;
+                if((leadIndex < 0) || (el > maxElement))
+                {
+                    leadIndex = i;    
+                    maxElement = el;
+                }
             }
         }
         
@@ -251,10 +266,10 @@ $(document).ready(() =>
         //
         
     //const dim = 4;
-    const dim = 100;
+    const dim = 1000;
     const aug_height = dim + 1;
     
-    const minTargetSquare = 16 * 16;
+    const minTargetSquare = 128 * 128;
     
         // initialize test linear equations system
         
@@ -422,12 +437,14 @@ $(document).ready(() =>
     //printAugmentedMatrix(dim, backData[0].float);
     
         // continue on CPU
+    
+    var partialMatrix = new Float64Array(backData[0].float);
         
-    continueElimination(dim, left, top, backData[0].float);
+    continueElimination(dim, left, top, partialMatrix);
     
-    var solution = new Float32Array(dim);
+    var solution = new Float64Array(dim);
     
-    doGaussBackSteps(dim, backData[0].float, solution);
+    doGaussBackSteps(dim, partialMatrix, solution);
     
     var t2 = Date.now();
     
