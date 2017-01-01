@@ -214,7 +214,7 @@ function fillTestSystem(knownX, matrix, vector)
 
 function main()
 {
-    const dim = 4;
+    const dim = 1000;
     
     var knownX = new Float64Array(dim);
 
@@ -230,12 +230,18 @@ function main()
     
     fillTestSystem(knownX, matrix, vector);        
     
+    var t1 = Date.now();
+    
     var slv = new Solver(dim);
 
     slv.useMatrix(matrix);
     slv.useVector(vector);
     
     slv.solve();
+    
+    var t2 = Date.now();
+    
+    console.log('Done in ' + (t2 - t1) + ' ms');
 
     ///*
     var logMatrix = [];
@@ -254,8 +260,8 @@ function main()
         logMatrix[i] = tmp;
     }
     
-    console.log(logMatrix); //*/
-    console.log(slv.x);
+    //console.log(logMatrix); //*/
+    //console.log(slv.x);
     console.log(slv.calcErrorSquare());
 }
 
