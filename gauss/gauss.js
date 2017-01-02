@@ -217,7 +217,7 @@ function fillTestSystem(knownX, matrix, vector)
 
 //------------------------------------------------------------------------------
 
-function main()
+$(document).ready(() => 
 {
     const dim = 1000;
     
@@ -245,7 +245,9 @@ function main()
     slv.solve();
     
     var t2 = Date.now();
-    
+
+    $(document.body).append('<p>Done in ' + (t2 - t1) + ' ms</p>');
+
     console.log('Done in ' + (t2 - t1) + ' ms');
 
     ///*
@@ -267,7 +269,12 @@ function main()
     
     //console.log(logMatrix); //*/
     //console.log(slv.x);
-    console.log(slv.calcErrorSquare());
-}
+    
+    var errSq = slv.calcErrorSquare();
+    
+    console.log(errSq);    
+    
+    $(document.body).append('<p>' + errSq + '</p>');
+});
 
 //------------------------------------------------------------------------------
