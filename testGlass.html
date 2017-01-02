@@ -11,6 +11,7 @@
         <script type="x-shader/x-fragment" id="commonKernelRoutines">
             
             #define readInput texture2D
+            #define readNativeFloat texture2D
             
             precision highp float;
             
@@ -59,7 +60,10 @@
                 //      high -> low
                 
                 //nv = floor(255.0 * nv + 0.5);
-                nv *= 255.0;
+                //nv *= 255.0;
+                //nv = floor(256.0 * nv);
+                //nv = floor(256.0 * nv + 0.06);
+                nv = floor(255.0 * nv);
                 
                 bool signBit = (nv.w > 127.0);
                 
@@ -141,6 +145,7 @@
                 // matrix is augmented with vector and transposed (so vector is last row)
             
             uniform highp sampler2D matrix;
+            //uniform lowp sampler2D matrix;
         
                 // 2D fetch coords helpers
                 
@@ -151,9 +156,14 @@
             {
                 vec2 id = getThreadId();
                 
+                //vec4 rawSrcData = readInput(matrix, buildAddress(addrOffset, addrUnit, id));
+                
                 float valf = readFloat(matrix, buildAddress(addrOffset, addrUnit, id));
 
-                writeFloat(valf + 0.5);
+                //writeFloat(valf + 0.5);
+                writeFloat(valf);
+                //writeFloat(-0.1);
+                //writeOutput(vec4(valf) / 255.0);
             }
             
         </script>
@@ -248,6 +258,6 @@
             }
             
         </script>
-        
+
     </body>
 </html>
