@@ -1,8 +1,20 @@
 //------------------------------------------------------------------------------
 
+function infoLog(s)
+{
+    $(document.body).append('<p>' + s + '</p>');
+}
+
+//------------------------------------------------------------------------------
+
 function FloatFromUbytes(conversionPlace)
 {
     // conversion place b0, b1, b2, b3
+    
+    infoLog(conversionPlace.b0.toString(16));
+    infoLog(conversionPlace.b1.toString(16));
+    infoLog(conversionPlace.b2.toString(16));
+    infoLog(conversionPlace.b3.toString(16));
     
     console.log(conversionPlace.b0.toString(16));
     console.log(conversionPlace.b1.toString(16));
@@ -134,6 +146,8 @@ function augmentMatrix(matrix, vector, augmentedMatrix)
 
 function printAugmentedMatrix(dim, augmentedMatrix)
 {
+    infoLog('<br>');
+    
     for(var i = 0; i < dim; ++i)
     {
         var tmp = [];
@@ -142,7 +156,35 @@ function printAugmentedMatrix(dim, augmentedMatrix)
         {
             tmp.push(augmentedMatrix[j * dim + i]);
         }
+        
+        infoLog(tmp + '<br>');
+        
+        console.log(tmp);        
+    }
+}
 
+function printAugmentedMatrixRaw(dim, augmentedMatrix)
+{
+    infoLog('<br>');
+    
+    for(var i = 0; i < dim; ++i)
+    {
+        var tmp = [];
+        
+        for(var j = 0; j <= dim; ++j)
+        {
+            var index = j * dim * 4 + i * 4;
+            
+            var b0 = augmentedMatrix[index + 0];
+            var b1 = augmentedMatrix[index + 1];
+            var b2 = augmentedMatrix[index + 2];
+            var b3 = augmentedMatrix[index + 3];
+            
+            tmp.push('{' + b0.toString(16) + ' ' + b1.toString(16) +' ' + b2.toString(16) + ' ' + b3.toString(16) + '}');
+        }
+        
+        infoLog(tmp + '<br>');
+        
         console.log(tmp);        
     }
 }
@@ -153,7 +195,7 @@ $(document).ready(() =>
 {
     var tt = new Float32Array(1);
     
-    tt[0] = 20;
+    tt[0] = 35;
     
     var ttb = new Uint8Array(tt.buffer);
     
@@ -178,14 +220,22 @@ $(document).ready(() =>
     const dim = 4;
     const aug_height = dim + 1;
     
+
     var matrixSrc = [   0,  3,  -1, 8,
                         10, -1, 2,  0,
                         -1,	11, -1, 3,
                         2,	-1, 10, -1  ];
-
+    /*
+    var matrixSrc = [   tt[0], tt[0],  1, tt[0],
+                        tt[0], 1, tt[0], tt[0],
+                        tt[0],	11, tt[0], 2,
+                        tt[0],	tt[0], tt[0], tt[0]  ];
+    */                    
     var matrix = new Float32Array(matrixSrc);
 
     var vector = new Float32Array([35, 14, 30, 26]);
+    
+    //var vector = new Float32Array([tt[0], tt[0], tt[0], tt[0]]);
 
     var transferMatrix = new Float32Array(dim * aug_height);
     
@@ -242,6 +292,7 @@ $(document).ready(() =>
     var dataConverted = new Float32Array(dataRaw.buffer);
 
     printAugmentedMatrix(dim, dataConverted);
+    //printAugmentedMatrixRaw(dim, dataRaw);
 });
 
 //------------------------------------------------------------------------------
