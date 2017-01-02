@@ -1,44 +1,116 @@
 //------------------------------------------------------------------------------
 
-function fillTestSystem(knownX, matrix, vector)
+function GlassSolver(glass, dimension)
 {
-    var N = vector.length;
-
-    for(var i = 0, index = 0; i < N; ++i)
+    var solver = this;
+    
+    solver.glass = glass;
+        
+        // use dimensions
+        
+    solver.dimension = dimension;
+    var aug_height = solver.aug_height = dimension + 1;
+    
+    var surfaceSize = solver.surfaceSize = dimension * aug_height;
+    
+        // create dimension-dependend typed arrays
+    
+    solver.x = new Float64Array(dimension);
+    solver.partialMatrix = new Float64Array(surfaceSize);
+    
+        // create ping-pong resources
+    
+    solver.pp = [];
+    
+    for(var i = 0; i < 2; ++i)
     {
-        var s = 0;
-        
-        for(var j = 0; j < N; ++j, ++index)
-        {
-            var a = matrix[index] = Math.floor(Math.random() * 10);
-            
-            s += a * knownX[j];
-        }
-        
-        vector[i] = s;
+        var r = glass.createResource(dimension, aug_height, glass.gl.RGBA, glass.gl.UNSIGNED_BYTE);
+
+        solver.pp[i] = {resource: r, target: glass.createOutputTarget(r)};
     }
+    
+        // create GPU program stuff
+
+    var kernelSource = 
+            
+        glass.buildDefines({'WIDTH' : dimension, 'HEIGHT' : aug_height}) + 
+        $('#commonKernelRoutines').text() + 
+        $('#eliminator3').text();
+    
+    var kernel = glass.createKernel(kernelSource);
+    
+    if(!kernel)
+    {
+        console.log(glass.errorLog);
+    }
+
+    glass.setKernel(kernel);
+    
+    glass.linkInputSampler(0, 'matrix');
+
+    solver.leftTopLoc = glass.gl.getUniformLocation(kernel, 'leftTop');
+    solver.leadIndexLoc = glass.gl.getUniformLocation(kernel, 'leadIndex');
+    
+        // create readback surfaces (one if them also used for initial data transfer)
+        
+    solver.backData = [];
+    
+    for(var i = 0; i < 2; ++i)
+    {   
+        var resourcePack = {};
+        
+        resourcePack.float = new Float32Array(surfaceSize);
+        resourcePack.ubyte = new Uint8Array(resourcePack.float.buffer);
+        
+        solver.backData[i] = resourcePack;
+    }
+    
+        //
+        
+    solver.minTargetSquare = 256 * 256;
 }
 
 //------------------------------------------------------------------------------
 
-function augmentMatrix(matrix, vector, augmentedMatrix)
+GlassSolver.prototype.useMatrix = function(matrix)
 {
-    var N = vector.length;
+    this.matrix = matrix;
+}
+
+//------------------------------------------------------------------------------
+
+GlassSolver.prototype.useVector = function(vector)
+{
+    this.vector = vector;
+}
+
+//------------------------------------------------------------------------------
+
+GlassSolver.prototype.augmentMatrix = function()
+{
+    var solver = this;
+    
+    var dimension = solver.dimension;
+    
+    var matrix = solver.matrix;
+    var vector = solver.vector;
+    
+    var augmentedMatrix = solver.backData[0].float;
 
         // write matrix cols as rows of augmented matrix
         // (transposed)
     
-    for(var i = 0, augIndex = 0; i < N; ++i)
+    for(var i = 0, augIndex = 0; i < dimension; ++i)
     {
-        for(var j = 0; j < N; ++j, ++augIndex)
+        for(var j = 0; j < dimension; ++j, ++augIndex)
         {
-            augmentedMatrix[augIndex] = matrix[j * N + i]; 
+            augmentedMatrix[augIndex] = matrix[j * dimension + i]; 
         }
     } 
     
         // write vector B as last row of augmented matrix
     
-    for(var i = 0; i < N; ++i, ++augIndex)
+    for(var i = 0; i < dimension; ++i, ++augIndex)
     {
         augmentedMatrix[augIndex] = vector[i]; 
     }
@@ -46,24 +118,47 @@ function augmentMatrix(matrix, vector, augmentedMatrix)
 
 //------------------------------------------------------------------------------
 
-function printAugmentedMatrix(dim, augmentedMatrix)
+GlassSolver.prototype.combineAugmentedMatrix = function(doneLeft)
 {
-    for(var i = 0; i < dim; ++i)
-    {
-        var tmp = [];
-        
-        for(var j = 0; j <= dim; ++j)
-        {
-            tmp.push(augmentedMatrix[j * dim + i]);
-        }
+    var solver = this;
+    
+    var dimension = solver.dimension;
+    
+        // take last col from last rendered data, prev-last col from prev-last rendered data,
+        // and so on cycle
 
-        console.log(tmp);        
+    var dataDest = solver.backData[0].float;
+    var dataSrc = solver.backData[1].float;
+    
+    var index;
+    
+    for(var col = doneLeft - 1; col >= 0; col -= 2)
+    {
+        for(var row = 0; row <= dimension; ++row)
+        {
+            index = row * dimension + col;
+            
+            dataDest[index] = dataSrc[index];
+        }
+    }
+    
+        // copy rendered single-precision data to double-precision tmp resource
+        
+        // to do: no need to copy full matrix
+        
+    var partialMatrix = solver.partialMatrix;
+    
+    var surfaceSize = solver.surfaceSize;
+
+    for(index = 0; index < surfaceSize; ++index)
+    {
+        partialMatrix[index] = dataDest[index];
     }
 }
 
 //------------------------------------------------------------------------------
 
-function findLeadIndex(valuesRow, length)
+GlassSolver.prototype.findLeadIndex = function(valuesRow, length)
 {
     var leadIndex = -1;
     
@@ -88,28 +183,14 @@ function findLeadIndex(valuesRow, length)
 
 //------------------------------------------------------------------------------
 
-function combineAugmentedMatrix(dim, doneLeft, dataLast, dataPrevious)
+GlassSolver.prototype.eliminateRect = function(left, top, leadIndex)
 {
-    // last col from dataLast, prev-last from dataPrevious, and cycle
+    var solver = this;
     
-    var dataDest = dataLast;
-    var dataSrc = dataPrevious;
-
-    for(var col = doneLeft - 1; col >= 0; col -= 2)
-    {
-        for(var row = 0; row <= dim; ++row)
-        {
-            var index = row * dim + col;
-            
-            dataDest[index] = dataSrc[index];
-        }
-    }
-}
-
-//------------------------------------------------------------------------------
-
-function eliminateRect(dim, left, top, augmentedMatrix, leadIndex)
-{
+    var dimension = solver.dimension;
+    
+    var augmentedMatrix = solver.partialMatrix;
+    
     var rowOffset;
     var rowLeftOffset;
     var rowLeadOffset;
@@ -123,9 +204,9 @@ function eliminateRect(dim, left, top, augmentedMatrix, leadIndex)
         
     var leadDivisor;
         
-    for(var row = top; row <= dim; ++row)
+    for(var row = top; row <= dimension; ++row)
     {
-        rowOffset = row * dim;
+        rowOffset = row * dimension;
         
         rowLeadOffset = rowOffset + leadIndex;
         
@@ -153,15 +234,15 @@ function eliminateRect(dim, left, top, augmentedMatrix, leadIndex)
     
     var divisor;
     
-    for(var col = left + 1; col < dim; ++col)
+    for(var col = left + 1; col < dimension; ++col)
     {
         divisor = augmentedMatrix[topOffset + col];
         
         if(Math.abs(divisor) > 0)
         {
-            for(var row = top; row <= dim; ++row)
+            for(var row = top; row <= dimension; ++row)
             {
-                rowOffset = row * dim;
+                rowOffset = row * dimension;
                 
                 rowLeftOffset = rowOffset + left;   
                 currentOffset = rowOffset + col;
@@ -172,19 +253,23 @@ function eliminateRect(dim, left, top, augmentedMatrix, leadIndex)
     }
 }
 
-//------------------------------------------------------------------------------
-
-function continueElimination(dim, left, top, augmentedMatrix)
+GlassSolver.prototype.continueElimination = function(left, top)
 {
-    for(; top < dim; ++top)
+    var solver = this;
+    
+    var dimension = solver.dimension;
+    
+    var augmentedMatrix = solver.partialMatrix;
+    
+    for(; top < dimension; ++top)
     {
         var leadIndex = -1;
         
         var maxElement;
         
-        var offset = top * dim;
+        var offset = top * dimension;
         
-        for(var i = left, index = offset + left; i < dim; ++i, ++index)
+        for(var i = left, index = offset + left; i < dimension; ++i, ++index)
         {
             var el = Math.abs(augmentedMatrix[index]);
             
@@ -203,7 +288,7 @@ function continueElimination(dim, left, top, augmentedMatrix)
             continue;
         }
         
-        eliminateRect(dim, left, top, augmentedMatrix, leadIndex);
+        solver.eliminateRect(left, top, leadIndex);
         
         ++left;
     }
@@ -211,38 +296,160 @@ function continueElimination(dim, left, top, augmentedMatrix)
 
 //------------------------------------------------------------------------------
 
-function doGaussBackSteps(dim, augmentedMatrix, solution)
+GlassSolver.prototype.doGaussBackSteps = function()
 {
-    var lastRowOffset = dim * dim;
+    var solver = this;
     
-    for(var col = dim - 1; col >= 0; --col)
+    var dimension = solver.dimension;
+    
+    var augmentedMatrix = solver.partialMatrix;
+    
+    var x = solver.x;
+    
+    var lastRowOffset = dimension * dimension;
+    
+    for(var col = dimension - 1; col >= 0; --col)
     {
         var b = augmentedMatrix[lastRowOffset + col];
         
-        for(var i = dim - 1; i > col; --i)
+        for(var i = dimension - 1; i > col; --i)
         {
-            b -= augmentedMatrix[i * dim + col] * solution[i];
+            b -= augmentedMatrix[i * dimension + col] * x[i];
         }
         
-        solution[col] = b;    
+        x[col] = b;    
     }
 }
 
 //------------------------------------------------------------------------------
 
-function calcErrorSquare(matrix, x, vector)
+GlassSolver.prototype.solve = function()
 {
-    var dim = x.length;
+    var solver = this;    
+    
+    var glass = solver.glass;
+    
+        // cache dimension values 
+        
+    var dimension = solver.dimension;
+    var aug_height = solver.aug_height;
+    
+        // cache uniform locations
+        
+    var leftTopLoc = solver.leftTopLoc;
+    var leadIndexLoc = solver.leadIndexLoc;
+        
+        // cache GPU memory-map resources
+        
+    var pp = solver.pp;
+    var backData = solver.backData;
+    
+        // cache other stuff
+        
+    var minTargetSquare = solver.minTargetSquare;
+    
+        // push initial data to GPU
+    
+    solver.augmentMatrix();
+
+    for(var i = 0; i < 2; ++i)
+    {
+        glass.fillResource(solver.pp[i].resource, backData[0].ubyte);
+    }
+
+        // main dispatch cycle
+        
+    var ppIndexInput = 0;
+    var ppIndexOutput = 1;
+
+    var doneTop;    
+    var doneLeft;
+    
+    var leadIndex = solver.findLeadIndex(backData[0].float, dimension);
+
+    for(var top = 0, left = 0; top < dimension;)
+    {
+        var dispatchWidth = dimension - left;
+        var dispatchHeight = aug_height - top;
+
+        glass.gl.uniform2f(leftTopLoc, left, top);
+        glass.gl.uniform1f(leadIndexLoc, leadIndex);
+
+        glass.attachInputResource(0, pp[ppIndexInput].resource);
+        glass.setOutputTarget(pp[ppIndexOutput].target);
+        
+        glass.dispatchKernel(left, top, dispatchWidth, dispatchHeight);
+        
+        doneTop = top;
+        doneLeft = left;
+        
+        ++top;
+        
+        if(leadIndex >= 0)
+        {
+            ++left;    
+        }
+        
+        if(dispatchWidth * dispatchHeight < minTargetSquare)
+        {
+            break;    
+        }
+        
+        if(top < dimension)
+        {
+            var readBackLength = dimension - left;
+            
+            var activeTargetBackup = backData[ppIndexOutput];
+            
+            glass.readBack(activeTargetBackup.ubyte, left, top, readBackLength, 1);
+
+            leadIndex = solver.findLeadIndex(activeTargetBackup.float, readBackLength);
+            
+            if(leadIndex >= 0)
+            {
+                leadIndex += left;
+            }
+            
+            ppIndexInput = 1 - ppIndexInput;
+            ppIndexOutput = 1 - ppIndexOutput;
+        }
+    }
+
+    glass.readBack(backData[0].ubyte, 0, 0, dimension, aug_height);
+    
+    glass.setOutputTarget(pp[1 - ppIndexOutput].target);
+    glass.readBack(backData[1].ubyte, 0, 0, dimension, aug_height);  
+
+    solver.combineAugmentedMatrix(doneLeft);
+    
+        // continue rest of computations on CPU
+
+    solver.continueElimination(left, top);
+
+    solver.doGaussBackSteps();
+}
+
+//------------------------------------------------------------------------------
+
+GlassSolver.prototype.calcErrorSquare = function()
+{
+    var solver = this;    
+
+    var dimension = solver.dimension;
+
+    var matrix = solver.matrix;
+    var vector = solver.vector;
+    var x = solver.x;
 
     var errSquare = 0;
     
     var index = 0;
     
-    for(var i = 0; i < dim; ++i)
+    for(var i = 0; i < dimension; ++i)
     {
         var s = 0;
         
-        for(var j = 0; j < dim; ++j)
+        for(var j = 0; j < dimension; ++j)
         {
             s += matrix[index] * x[j];
                         
@@ -259,6 +466,44 @@ function calcErrorSquare(matrix, x, vector)
 
 //------------------------------------------------------------------------------
 
+function fillTestSystem(knownX, matrix, vector)
+{
+    var N = vector.length;
+
+    for(var i = 0, index = 0; i < N; ++i)
+    {
+        var s = 0;
+        
+        for(var j = 0; j < N; ++j, ++index)
+        {
+            var a = matrix[index] = Math.floor(Math.random() * 10);
+            
+            s += a * knownX[j];
+        }
+        
+        vector[i] = s;
+    }
+}
+
+//------------------------------------------------------------------------------
+
+function printAugmentedMatrix(dim, augmentedMatrix)
+{
+    for(var i = 0; i < dim; ++i)
+    {
+        var tmp = [];
+        
+        for(var j = 0; j <= dim; ++j)
+        {
+            tmp.push(augmentedMatrix[j * dim + i]);
+        }
+
+        console.log(tmp);        
+    }
+}
+
+//------------------------------------------------------------------------------
+
 $(document).ready(() => 
 {
     var glass = new Glass();
@@ -268,9 +513,7 @@ $(document).ready(() =>
     //const dim = 4;
     const dim = 1000;
     const aug_height = dim + 1;
-    
-    const minTargetSquare = 128 * 128;
-    
+
         // initialize test linear equations system
         
     var knownX = new Float32Array(dim);
@@ -292,163 +535,24 @@ $(document).ready(() =>
 
     fillTestSystem(knownX, matrix, vector); 
     
+        //
+            
+    var solver = new GlassSolver(glass, dim);
+    
+    solver.useMatrix(matrix);
+    solver.useVector(vector);
+    
     var t1 = Date.now();
     
-    var transferMatrix = new Float32Array(dim * aug_height);
-    
-    augmentMatrix(matrix, vector, transferMatrix);
-    
-    var transferMatrixConverted = new Uint8Array(transferMatrix.buffer);
+    solver.solve();
 
-        // create ping-pong resources
-    
-    var pp = [];
-    
-    var ppIndexInput = 0;
-    var ppIndexOutput = 1;
-
-    for(var i = 0; i < 2; ++i)
-    {
-        var r = glass.createResource(dim, aug_height, glass.gl.RGBA, glass.gl.UNSIGNED_BYTE);
-
-        pp[i] = {resource: r, target: glass.createOutputTarget(r)};
-        
-        glass.fillResource(pp[i].resource, transferMatrixConverted);
-    }
-
-        //
-
-    var kernelSource = 
-            
-        glass.buildDefines({'WIDTH' : dim, 'HEIGHT' : aug_height}) + 
-        $('#commonKernelRoutines').text() + 
-        $('#eliminator3').text();
-    
-    var kernel = glass.createKernel(kernelSource);
-    
-    if(!kernel)
-    {
-        console.log(glass.errorLog);
-    }
-
-    glass.setKernel(kernel);
-    
-    glass.linkInputSampler(0, 'matrix');
-
-    var leftTopLoc = glass.gl.getUniformLocation(kernel, 'leftTop');
-    var leadIndexLoc = glass.gl.getUniformLocation(kernel, 'leadIndex');
-    
-        //
-        
-    var backData = [];
-    
-    for(var i = 0; i < 2; ++i)
-    {   
-        var resourcePack = {};
-        
-        resourcePack.float = new Float32Array(dim * aug_height);
-        resourcePack.ubyte = new Uint8Array(resourcePack.float.buffer);
-        
-        backData[i] = resourcePack;
-    }
-        //
-    
-    var doneTop;    
-    var doneLeft;
-    
-    var leadIndex = findLeadIndex(transferMatrix, dim);
-
-    for(var top = 0, left = 0; top < dim;)
-    {
-        var dispatchWidth = dim - left;
-        var dispatchHeight = aug_height - top;
-
-        glass.gl.uniform2f(leftTopLoc, left, top);
-        glass.gl.uniform1f(leadIndexLoc, leadIndex);
-
-        glass.attachInputResource(0, pp[ppIndexInput].resource);
-        glass.setOutputTarget(pp[ppIndexOutput].target);
-        
-        glass.dispatchKernel(left, top, dispatchWidth, dispatchHeight);
-        
-        doneTop = top;
-        doneLeft = left;
-        
-        ++top;
-        
-        if(leadIndex >= 0)
-        {
-            ++left;    
-        }
-        //*
-        if(dispatchWidth * dispatchHeight < minTargetSquare)
-        {
-            break;    
-        }
-        //*/
-        if(top < dim)
-        {
-            var readBackLength = dim - left;
-            
-            var activeTargetBackup = backData[ppIndexOutput];
-            
-            glass.readBack(activeTargetBackup.ubyte, left, top, readBackLength, 1);
-
-            leadIndex = findLeadIndex(activeTargetBackup.float, readBackLength);
-            
-            if(leadIndex >= 0)
-            {
-                leadIndex += left;
-            }
-            
-            ppIndexInput = 1 - ppIndexInput;
-            ppIndexOutput = 1 - ppIndexOutput;
-        }
-    }
-
-    glass.setOutputTarget(pp[ppIndexOutput].target);
-    glass.readBack(backData[0].ubyte, 0, 0, dim, aug_height);
-    
-    glass.setOutputTarget(pp[1 - ppIndexOutput].target);
-    glass.readBack(backData[1].ubyte, 0, 0, dim, aug_height);  
-
-    combineAugmentedMatrix(dim, doneLeft, backData[0].float, backData[1].float)
-    
-        // debug count diagonal
-    
-    console.log('done: ' + doneLeft + ', ' + doneTop);
-    
-    var units = 0;
-    
-    for(var i = 0; i < dim; ++i)
-    {
-        if(backData[0].float[i * dim + i] === 1)
-        {
-            ++units;
-        }
-        else
-        {
-            break;
-        }
-    }
-    
-    console.log(units);
-    
-    //printAugmentedMatrix(dim, backData[0].float);
-    
-        // continue on CPU
-    
-    var partialMatrix = new Float64Array(backData[0].float);
-        
-    continueElimination(dim, left, top, partialMatrix);
-    
-    var solution = new Float64Array(dim);
-    
-    doGaussBackSteps(dim, partialMatrix, solution);
-    
     var t2 = Date.now();
     
+    $(document.body).append('<p>Done in ' + (t2 - t1) + ' ms</p>');
+    
     console.log('Done in ' + (t2 - t1) + ' ms');
+    
+    var solution = solver.x;
     
     console.log(solution);
     console.log(knownX);
@@ -463,10 +567,10 @@ $(document).ready(() =>
     }
     
     console.log(serr);
+
+    console.log(solver.calcErrorSquare());
     
-    console.log(calcErrorSquare(matrix, solution, vector));
-    
-    //printAugmentedMatrix(dim, backData[0].float);
+    $(document.body).append('<p>' + serr + '</p>');
 });
 
 //------------------------------------------------------------------------------
