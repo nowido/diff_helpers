@@ -25,7 +25,7 @@ function GlassSolver(glass, dimension)
     for(var i = 0; i < 2; ++i)
     {
         var r = glass.createResource(dimension, aug_height, glass.gl.RGBA, glass.gl.UNSIGNED_BYTE);
-
+        
         solver.pp[i] = {resource: r, target: glass.createOutputTarget(r)};
     }
     
@@ -67,7 +67,7 @@ function GlassSolver(glass, dimension)
     
         //
         
-    solver.minTargetSquare = 256 * 256;
+    solver.minTargetSquare = 300 * 300;
 }
 
 //------------------------------------------------------------------------------
@@ -414,7 +414,7 @@ GlassSolver.prototype.solve = function()
             ppIndexOutput = 1 - ppIndexOutput;
         }
     }
-
+    
     glass.readBack(backData[0].ubyte, 0, 0, dimension, aug_height);
     
     glass.setOutputTarget(pp[1 - ppIndexOutput].target);
@@ -462,6 +462,89 @@ GlassSolver.prototype.calcErrorSquare = function()
     }
     
     return errSquare;
+}
+
+//------------------------------------------------------------------------------
+
+GlassSolver.prototype.calcResiduals = function(residuals)
+{
+    var solver = this;    
+
+    var dimension = solver.dimension;
+
+    var matrix = solver.matrix;
+    var vector = solver.vector;
+    var x = solver.x;
+
+    var errSquare = 0;
+    
+    var index = 0;
+    
+    for(var i = 0; i < dimension; ++i)
+    {
+        var s = 0;
+        
+        for(var j = 0; j < dimension; ++j)
+        {
+            s += matrix[index] * x[j];
+                        
+            ++index;
+        }
+        
+        var err = residuals[i] = (vector[i] - s);
+        
+        errSquare += (err * err);
+    }
+    
+    return errSquare;
+}
+
+//------------------------------------------------------------------------------
+
+GlassSolver.prototype.iterate = function(count)
+{
+    var solver = this;    
+
+    var dimension = solver.dimension;
+    
+    var vector = solver.vector;
+    var x = solver.x;
+    
+    var solution = new Float32Array(dimension);
+    var residuals = new Float32Array(dimension);
+
+    solver.solve();  
+    
+    for(var j = 0; j < dimension; ++j)
+    {
+        solution[j] = x[j];
+    }
+    
+    var errsq;
+    
+    for(var i = 0; i < count - 1; ++i)
+    {
+        errsq = solver.calcResiduals(residuals);
+        
+        console.log('-- ' + errsq);
+        
+        solver.useVector(residuals);
+        
+        solver.solve();
+        
+        for(var j = 0; j < dimension; ++j)
+        {
+             x[j] += solution[j];
+             
+             solution[j] = x[j];
+        }
+        
+        solver.useVector(vector);
+    }
+    
+    errsq = solver.calcResiduals(residuals);
+    
+    console.log('-- ' + errsq);
 }
 
 //------------------------------------------------------------------------------
@@ -543,32 +626,23 @@ $(document).ready(() =>
     solver.useVector(vector);
     
     var t1 = Date.now();
-    
-    solver.solve();
 
+    solver.iterate(2);    
+    
     var t2 = Date.now();
     
     $(document.body).append('<p>Done in ' + (t2 - t1) + ' ms</p>');
     
-    console.log('Done in ' + (t2 - t1) + ' ms');
-    
-    var solution = solver.x;
-    
-    console.log(solution);
-    console.log(knownX);
-    
     var serr = 0;
-    
+
     for(var i = 0; i < dim; ++i)
     {
-        var e = solution[i] - knownX[i];
-        
+        var e = solver.x[i] - knownX[i];
+
         serr += e * e;
     }
     
     console.log(serr);
-
-    console.log(solver.calcErrorSquare());
     
     $(document.body).append('<p>' + serr + '</p>');
 });
