@@ -194,6 +194,86 @@ Solver.prototype.calcErrorSquare = function()
     return errSquare;
 }
 
+Solver.prototype.calcResiduals = function(residuals)
+{
+    var solver = this;    
+
+    var dimension = solver.dimension;
+
+    var matrix = solver.matrix;
+    var vector = solver.vector;
+    var x = solver.x;
+
+    var errSquare = 0;
+    
+    var index = 0;
+    
+    for(var i = 0; i < dimension; ++i)
+    {
+        var s = 0;
+        
+        for(var j = 0; j < dimension; ++j)
+        {
+            s += matrix[index] * x[j];
+                        
+            ++index;
+        }
+        
+        var err = residuals[i] = (vector[i] - s);
+        
+        errSquare += (err * err);
+    }
+    
+    return errSquare;
+}
+
+Solver.prototype.iterate = function(count)
+{
+    var solver = this;    
+
+    var dimension = solver.dimension;
+    
+    var vector = solver.vector;
+    var x = solver.x;
+    
+    var solution = new Float64Array(dimension);
+    var residuals = new Float64Array(dimension);
+
+    solver.solve();  
+    
+    for(var j = 0; j < dimension; ++j)
+    {
+        solution[j] = x[j];
+    }
+    
+    var errsq;
+    
+    for(var i = 0; i < count - 1; ++i)
+    {
+        errsq = solver.calcResiduals(residuals);
+        
+        console.log('-- ' + errsq);
+        
+        solver.useVector(residuals);
+        
+        solver.solve();
+        
+        for(var j = 0; j < dimension; ++j)
+        {
+             x[j] += solution[j];
+             
+             solution[j] = x[j];
+        }
+        
+        solver.useVector(vector);
+    }
+    
+    errsq = solver.calcResiduals(residuals);
+    
+    console.log('-- ' + errsq);
+}
+
+
 //------------------------------------------------------------------------------
 
 function fillTestSystem(knownX, matrix, vector)
@@ -242,6 +322,7 @@ $(document).ready(() =>
     slv.useMatrix(matrix);
     slv.useVector(vector);
     
+    //slv.iterate(10);
     slv.solve();
     
     var t2 = Date.now();
@@ -250,7 +331,7 @@ $(document).ready(() =>
 
     console.log('Done in ' + (t2 - t1) + ' ms');
 
-    ///*
+    /*
     var logMatrix = [];
         
     var offset = 0;
@@ -267,8 +348,9 @@ $(document).ready(() =>
         logMatrix[i] = tmp;
     }
     
-    //console.log(logMatrix); //*/
+    //console.log(logMatrix);
     //console.log(slv.x);
+    */
     
     var errSq = slv.calcErrorSquare();
     
