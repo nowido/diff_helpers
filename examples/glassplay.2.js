@@ -627,7 +627,7 @@ $(document).ready(() =>
     
     var t1 = Date.now();
 
-    solver.iterate(2);    
+    solver.iterate(3);    
     
     var t2 = Date.now();
     
