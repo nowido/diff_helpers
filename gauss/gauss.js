@@ -38,10 +38,13 @@ Solver.prototype.solve = function()
         else if(leadingRow !== row)
         {
             solver.swapRows(row, leadingRow, col);  
+            solver.eliminate1(row, col);
         }
-
-        solver.eliminate(row, col);        
-
+        else
+        {
+            solver.eliminate2(row, col);        
+        }
+        
         ++row;
     }
     
@@ -93,7 +96,7 @@ Solver.prototype.findLeadingRow = function(top, left)
     return leadingRowIndex;
 }
 
-Solver.prototype.swapRows = function(r1, r2, left)
+Solver.prototype.swapRows = function(row, foundLeadingRow, left)
 {
     var solver = this;
     
@@ -101,23 +104,58 @@ Solver.prototype.swapRows = function(r1, r2, left)
 
     var matrix = solver.matrix;
     
+    var offset = row * dim + left;
+    var leadingOffset = foundLeadingRow * dim + left;
+    
+    var leadingDivisor = matrix[leadingOffset];
+    
     var tmp;
     
-    for(var i = left, offset1 = r1 * dim + left, offset2 = r2 * dim + left; i < dim; ++i, ++offset1, ++offset2)
+    for(var i = left; i < dim; ++i, ++offset, ++leadingOffset)
     {
-        tmp = matrix[offset1];
-        matrix[offset1] = matrix[offset2];
-        matrix[offset2] = tmp;
+        tmp = matrix[leadingOffset];
+        matrix[leadingOffset] = matrix[offset];
+        matrix[offset] = tmp / leadingDivisor;
     }
     
     var vector = solver.vector;
     
-    tmp = vector[r1];
-    vector[r1] = vector[r2];
-    vector[r2] = tmp;
+    tmp = vector[foundLeadingRow];
+    vector[foundLeadingRow] = vector[row];
+    vector[row] = tmp / leadingDivisor;
 }
 
-Solver.prototype.eliminate = function(top, left)
+Solver.prototype.eliminate1 = function(top, left)
+{
+    var solver = this;
+    
+    var dim = solver.dimension;
+
+    var matrix = solver.matrix;
+        
+        // top row was already divided by its lead, now process lower rows 
+    
+    var topOffset = top * dim;    
+    
+    for(var row = top + 1; row < dim; ++row)
+    {
+        var offset = row * dim + left;
+        
+        var element = matrix[offset];
+        
+        if(Math.abs(element) > 0)
+        {
+            for(var col = left; col < dim; ++col, ++offset)
+            {
+                matrix[offset] = matrix[topOffset + col] - matrix[offset] / element;    
+            }
+            
+            solver.vector[row] = solver.vector[top] - solver.vector[row] / element;
+        }
+    }
+}
+
+Solver.prototype.eliminate2 = function(top, left)
 {
     var solver = this;
     
