@@ -59,37 +59,6 @@ float calcErr(float* src, float* processed, size_t numElements)
 
 //-------------------------------------------------------------
 
-char* readFile(const char* fileName)
-{
-    char* content = NULL;
-    
-    FILE* f = fopen(fileName, "rb");    
-
-    if(f)
-    {
-        fseek(f, 0, SEEK_END);
-
-        long size = ftell(f);                
-
-        if(size > 0)
-        {            
-            fseek(f, 0, SEEK_SET);
-
-            size_t stringLength = size + 1;
-
-            content = (char*)malloc(stringLength);
-            fread(content, size, 1, f);
-            content[size] = 0;            
-        }
-
-        fclose(f);
-    }
-
-    return content;    
-}
-
-//-------------------------------------------------------------
-
 int main()
 {
     const size_t NUM_ELEMENTS = 1024 * 1024;
@@ -100,8 +69,6 @@ int main()
     float* srcData = (float*)malloc(BUF_SIZE);
 
     fillSrcDataRandom(srcData, NUM_ELEMENTS);
-
-    char* kernelSource = readFile("kernel1.cl");
 
         //
 
@@ -179,7 +146,7 @@ int main()
 
         //
 
-    program = cl.PrepareProgram(dev, devco, kernelSource);
+    program = cl.PrepareProgram(dev, devco, "#include \"kernel1.cl\"");
 
     if(!cl.clOk)
     {
@@ -249,7 +216,6 @@ cleanup:
     cl.Dispose();
 
     free(srcData);
-    free(kernelSource);
 
     printf("Bye.\n");    
     return 0;    
