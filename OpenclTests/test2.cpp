@@ -126,23 +126,6 @@ int main()
 
         goto cleanup;                
     }
-        //
-    
-    buffer = clCreateBuffer
-                (
-                    devco, 
-                    CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, 
-                    BUF_SIZE,
-                    srcData,
-                    &errcode
-                );
-    
-    if(buffer == NULL)
-    {
-        printf("Error buffer creation\n");
-
-        goto cleanup;
-    }
 
         //
 
@@ -167,6 +150,22 @@ int main()
         //
 
     gettimeofday(&before, NULL);
+    
+    buffer = clCreateBuffer
+                (
+                    devco, 
+                    CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, 
+                    BUF_SIZE,
+                    srcData,
+                    &errcode
+                );
+    
+    if(buffer == NULL)
+    {
+        printf("Error buffer creation\n");
+
+        goto cleanup;
+    }
 
     errcode = clSetKernelArg(kernelDoSome, 0, sizeof(cl_mem), &buffer);
 
@@ -207,9 +206,9 @@ int main()
 
 cleanup:
 
-    clReleaseKernel(kernelDoSome);
-    clReleaseProgram(program);
     clReleaseMemObject(buffer);
+    clReleaseKernel(kernelDoSome);
+    clReleaseProgram(program);    
     clReleaseCommandQueue(cmd);
     clReleaseContext(devco);    
 
