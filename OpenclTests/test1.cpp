@@ -24,7 +24,9 @@ void printInfo(ClDeviceInfo *info)
     printf("Preferred vector width (double): %u\n", *(cl_uint*)(info->entries[ClDeviceInfo::mapPreferredVectorWidthDouble]));
     printf("Native vector width (double): %u\n", *(cl_uint*)(info->entries[ClDeviceInfo::mapNativeVectorWidthDouble])); 
     printf("Preferred vector width (float): %u\n", *(cl_uint*)(info->entries[ClDeviceInfo::mapPreferredVectorWidthFloat]));
-    printf("Native vector width (float): %u\n", *(cl_uint*)(info->entries[ClDeviceInfo::mapNativeVectorWidthFloat]));     
+    printf("Native vector width (float): %u\n", *(cl_uint*)(info->entries[ClDeviceInfo::mapNativeVectorWidthFloat]));    
+    printf("Device available: %u\n", *(cl_bool*)(info->entries[ClDeviceInfo::mapAvailable]));   
+    printf("Compiler available: %u\n", *(cl_bool*)(info->entries[ClDeviceInfo::mapCompilerAvailable]));  
 }
 
 //-------------------------------------------------------------
