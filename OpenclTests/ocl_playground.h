@@ -21,7 +21,7 @@ struct ClPlayground
     char* buildLog;
 
     /////////////////////////////////////////
-    bool Init()
+    bool Init(cl_uint platformIndex = 0)
     {
         platformIds = NULL;
         cpuDevices = NULL;
@@ -44,7 +44,7 @@ struct ClPlayground
 
             if(clOk)
             {
-                cl_platform_id usePlatform = platformIds[0];
+                cl_platform_id usePlatform = platformIds[platformIndex];
 
                 cpuDevicesCount = getClDevicesCount(usePlatform, CL_DEVICE_TYPE_CPU);
                 
