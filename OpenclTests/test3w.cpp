@@ -185,8 +185,8 @@ struct Solver
 
                 // setup args & execute kernel
             
-            clSetKernelArg(eliminatorKernel, 1, sizeof(cl_uint), &left);
-            clSetKernelArg(eliminatorKernel, 2, sizeof(cl_uint), &top);
+            clSetKernelArg(eliminatorKernel, 1, sizeof(int), &left);
+            clSetKernelArg(eliminatorKernel, 2, sizeof(int), &top);
             clSetKernelArg(eliminatorKernel, 3, sizeof(int), &leadingIndex);
             clSetKernelArg(eliminatorKernel, 4, sizeof(cl_mem), pp + ppInputIndex);
             clSetKernelArg(eliminatorKernel, 5, sizeof(cl_mem), pp + ppOutputIndex);
