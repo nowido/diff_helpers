@@ -1,8 +1,8 @@
 __kernel void eliminator
                 (
                     unsigned int dim, 
-                    unsigned int left, 
-                    unsigned int top, 
+                    int left, 
+                    int top, 
                     int leadingIndex, 
                     __global float* matrixIn, 
                     __global float* matrixOut)
