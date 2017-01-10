@@ -5,6 +5,16 @@
 
 //-------------------------------------------------------------
 
+typedef void CL_CALLBACK fn_cl_notify
+        (
+            const char *errinfo, 
+            const void *private_info, 
+            size_t cb, 
+            void *user_data
+        );
+
+//-------------------------------------------------------------
+
 struct Solver
 {
     ClPlayground* cl;
