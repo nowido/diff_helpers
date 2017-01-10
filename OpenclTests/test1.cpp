@@ -109,50 +109,59 @@ int main()
 
     printf("CPUs: %u, GPUs: %u\n", cpuDevicesCount, gpuDevicesCount);
 
-    cpuDevices = (cl_device_id*)malloc(sizeof(cl_device_id) * cpuDevicesCount);
-    gpuDevices = (cl_device_id*)malloc(sizeof(cl_device_id) * gpuDevicesCount);
-
-    if(getClDeviceIds(usePlatform, CL_DEVICE_TYPE_CPU, cpuDevices, cpuDevicesCount) != CL_SUCCESS)
+    if(cpuDevicesCount > 0)
     {
-        printf("Error getClDeviceIds (CPU)");
+        cpuDevices = (cl_device_id*)malloc(sizeof(cl_device_id) * cpuDevicesCount);
 
-        goto cleanup;
+        if(getClDeviceIds(usePlatform, CL_DEVICE_TYPE_CPU, cpuDevices, cpuDevicesCount) != CL_SUCCESS)
+        {
+            printf("Error getClDeviceIds (CPU)");
+
+            goto cleanup;
+        }        
+
+        useCpuDevice = cpuDevices[CPUIndex];
+
+        if(getClDeviceInfo(useCpuDevice, &cpuDeviceInfo) != CL_SUCCESS)
+        {
+            printf("Error getClDeviceInfo (CPU)");
+
+            goto cleanup;
+        }
+        else
+        {
+            printf("--- CPU\n");
+
+            printInfo(&cpuDeviceInfo);
+        }
     }
-
-    if(getClDeviceIds(usePlatform, CL_DEVICE_TYPE_GPU, gpuDevices, gpuDevicesCount) != CL_SUCCESS)
+    
+    if(gpuDevicesCount > 0)
     {
-        printf("Error getClDeviceIds (GPU)");
+        gpuDevices = (cl_device_id*)malloc(sizeof(cl_device_id) * gpuDevicesCount);
 
-        goto cleanup;
-    }
+        if(getClDeviceIds(usePlatform, CL_DEVICE_TYPE_GPU, gpuDevices, gpuDevicesCount) != CL_SUCCESS)
+        {
+            printf("Error getClDeviceIds (GPU)");
 
-    useCpuDevice = cpuDevices[CPUIndex];
-    useGpuDevice = gpuDevices[GPUIndex];
+            goto cleanup;
+        }        
 
-    if(getClDeviceInfo(useCpuDevice, &cpuDeviceInfo) != CL_SUCCESS)
-    {
-        printf("Error getClDeviceInfo (CPU)");
+        useGpuDevice = gpuDevices[GPUIndex];
 
-        goto cleanup;
-    }
-    else
-    {
-        printf("--- CPU\n");
 
-        printInfo(&cpuDeviceInfo);
-    }
+        if(getClDeviceInfo(useGpuDevice, &gpuDeviceInfo) != CL_SUCCESS)
+        {
+            printf("Error getClDeviceInfo (GPU)");
 
-    if(getClDeviceInfo(useGpuDevice, &gpuDeviceInfo) != CL_SUCCESS)
-    {
-        printf("Error getClDeviceInfo (GPU)");
+            goto cleanup;
+        }
+        else
+        {
+            printf("--- GPU\n");
 
-        goto cleanup;
-    }
-    else
-    {
-        printf("--- GPU\n");
-
-        printInfo(&gpuDeviceInfo);
+            printInfo(&gpuDeviceInfo);
+        }        
     }
 
 cleanup:
