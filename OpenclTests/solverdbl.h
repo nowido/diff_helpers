@@ -5,6 +5,16 @@
 
 //-------------------------------------------------------------
 
+typedef void CL_CALLBACK fn_cl_notify
+        (
+            const char *errinfo, 
+            const void *private_info, 
+            size_t cb, 
+            void *user_data
+        );
+
+//-------------------------------------------------------------
+
 struct Solver
 {
     ClPlayground* cl;
@@ -191,7 +201,7 @@ struct Solver
         size_t workOffset[2];
         size_t workSize[2];
 
-        const size_t minGridSquare = 64 * 64;
+        const size_t minGridSquare = 16 * 16;
 
         int left = 0;
         int top = 0;
