@@ -10,30 +10,33 @@ __kernel void eliminator
     int id_col = get_global_id(0);  // already with offset 'left'
     int id_row = get_global_id(1);  // already with offset 'top'
 
-    int topOffset = top * dim;
-    int rowOffset = id_row * dim;
+    if((id_col < (int)dim) && (id_row <= (int)dim))
+    {
+        int topOffset = top * dim;
+        int rowOffset = id_row * dim;
 
-    bool validLead = (leadingIndex >= 0); // we set leadingIndex == -1 if there is no leading element in the top row
+        bool validLead = (leadingIndex >= 0); // we set leadingIndex == -1 if there is no leading element in the top row
 
-    bool needSwap = (leadingIndex != left) && validLead;
+        bool needSwap = (leadingIndex != left) && validLead;
 
-    bool weAreLeft = (id_col == left);
-    bool weAreLead = (id_col == leadingIndex);
+        bool weAreLeft = (id_col == left);
+        bool weAreLead = (id_col == leadingIndex);
 
-    int leadCol = needSwap ? leadingIndex : left;
+        int leadCol = needSwap ? leadingIndex : left;
 
-    float leadDivisor = matrixIn[topOffset + leadCol];
-    float leadValue = matrixIn[rowOffset + leadCol];
+        float leadDivisor = matrixIn[topOffset + leadCol];
+        float leadValue = matrixIn[rowOffset + leadCol];
 
-    float leadSafeRatio = (fabs(leadDivisor) > 0) ? (leadValue / leadDivisor) : leadValue;
+        float leadSafeRatio = (fabs(leadDivisor) > 0) ? (leadValue / leadDivisor) : leadValue;
 
-    int ourCol = needSwap ? (weAreLeft ? leadingIndex : (weAreLead ? left : id_col)) : id_col;
+        int ourCol = needSwap ? (weAreLeft ? leadingIndex : (weAreLead ? left : id_col)) : id_col;
 
-    float ourDivisor = matrixIn[topOffset + ourCol];
-    float ourValue = matrixIn[rowOffset + ourCol];
+        float ourDivisor = matrixIn[topOffset + ourCol];
+        float ourValue = matrixIn[rowOffset + ourCol];
 
-    matrixOut[rowOffset + id_col] = 
-        validLead ? 
-            (weAreLeft ? leadSafeRatio : ((fabs(ourDivisor) > 0) ? (leadSafeRatio - ourValue / ourDivisor) : ourValue)) : 
-            ourValue;
+        matrixOut[rowOffset + id_col] = 
+            validLead ? 
+                (weAreLeft ? leadSafeRatio : ((fabs(ourDivisor) > 0) ? (leadSafeRatio - ourValue / ourDivisor) : ourValue)) : 
+                ourValue;
+    }
 }
