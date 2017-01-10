@@ -3,87 +3,85 @@ __kernel void eliminator
                     unsigned int dim, 
                     int left, 
                     int top, 
-                    int leadingIndex, 
+                    int leadingIndex,                            
                     __local float* leadColumnRatio, // array of size groupRowsCount
-                    __local float* topRowElements, // array of size groupColumnsCount
-                    __local bool* safeDivisors, // array of size groupColumnsCount
+                    __local float* topRowElements, // array of size groupColumnsCount    
+                    __local int* safeD,                                                                      
                     __global float* matrixIn, 
-                    __global float* matrixOut)
-{
+                    __global float* matrixOut    
+                )
+{    
+    
     __local float leadDivisor;
-
-        // global and local thread ids
+    __local bool safeDivisor;
 
     int id_col = get_global_id(0);  // already with offset 'left'
     int id_row = get_global_id(1);  // already with offset 'top'
 
-    if((id_col >= (int)dim) || (id_row > (int)dim + 1))
-    {
-        return;
-    }
-    
-    size_t threadIdX = get_local_id(0);
-    size_t threadIdY = get_local_id(1);
+    if((id_col < (int)dim) && (id_row <= (int)dim))
+    {        
+        size_t threadIdX = get_local_id(0);
+        size_t threadIdY = get_local_id(1);
 
-        //
+        bool weAreFirstRowInGroup = (threadIdY == 0);
+        bool weAreFirstColumnInGroup = (threadIdX == 0);
 
-    bool validLead = (leadingIndex >= 0); // we set leadingIndex == -1 if there is no leading element in the top row
+            //
 
-    bool needSwap = (leadingIndex != left) && validLead;
+        bool validLead = (leadingIndex >= 0); // we set leadingIndex == -1 if there is no leading element in the top row
 
-    int topOffset = top * dim;
-    int rowOffset = id_row * dim;
+        bool needSwap = (leadingIndex != left) && validLead;
 
-    int leadCol = needSwap ? leadingIndex : left;
+        int topOffset = top * dim;
+        int rowOffset = id_row * dim;
 
-    bool weAreLeft = (id_col == left);
-    bool weAreLead = (id_col == leadingIndex);
+        int leadCol = needSwap ? leadingIndex : left;
 
-    int ourCol = needSwap ? (weAreLeft ? leadingIndex : (weAreLead ? left : id_col)) : id_col;
+        bool weAreLeft = (id_col == left);
+        bool weAreLead = (id_col == leadingIndex);
 
-        // use thread with local id (0, 0) to fetch leadDivisor
+        int ourCol = needSwap ? (weAreLeft ? leadingIndex : (weAreLead ? left : id_col)) : id_col;
 
-    bool safeDivisor;
+            // use thread with local id (0, 0) to fetch leadDivisor
 
-    if((threadIdX == 0) && (threadIdY == 0))
-    {
-        leadDivisor = matrixIn[topOffset + leadCol];
+        if(weAreFirstRowInGroup && weAreFirstColumnInGroup)
+        {
+            float ld = matrixIn[topOffset + leadCol];
 
-        safeDivisor = (fabs(leadDivisor) > 0);
-    }
+            leadDivisor = ld;
 
-    barrier(CLK_LOCAL_MEM_FENCE);
+            safeDivisor = (fabs(ld) > 0);
+        }
 
-        // use threads with local ids (0, 0 .. groupRowsCount - 1) to fetch lead column values and divide it by leadDivisor
+        barrier(CLK_LOCAL_MEM_FENCE);        
 
-    if(threadIdX == 0)
-    {
-        float leadValue = matrixIn[rowOffset + leadCol];
+            // use threads with local ids (0, 0 .. groupRowsCount - 1) to fetch lead column values and divide it by leadDivisor
 
-        leadColumnRatio[threadIdY] = safeDivisor ? (leadValue / leadDivisor) : leadValue;
-    }
+        if(weAreFirstColumnInGroup)
+        {
+            float leadValue = matrixIn[rowOffset + leadCol];
 
-        // use threads with local ids (0 .. groupColumnsCount - 1, 0) to fetch top row elements
+            leadColumnRatio[threadIdY] = safeDivisor ? (leadValue / leadDivisor) : leadValue;
+        }
+     
+            // use threads with local ids (0 .. groupColumnsCount - 1, 0) to fetch top row elements
 
-    if(threadIdY == 0)    
-    {
-        float ourDivisor = matrixIn[topOffset + ourCol];
+        if(weAreFirstRowInGroup)    
+        {
+            topRowElements[threadIdX] = matrixIn[topOffset + ourCol];
+        }
+        
+        barrier(CLK_LOCAL_MEM_FENCE);        
 
-        topRowElements[threadIdX] = ourDivisor;
+            // use all threads to perform elements computations using locally cached values
+           
+        float ourLeadRatio = leadColumnRatio[threadIdY];
+        float ourDivisor = topRowElements[threadIdX];
+        float ourValue = matrixIn[rowOffset + ourCol];
 
-        safeDivisors[threadIdX] = (fabs(ourDivisor) > 0);
-    }
-    
-    barrier(CLK_LOCAL_MEM_FENCE);
-
-        // use all threads to perform elements computations using locally cached values
-
-    float ourLeadRatio = leadColumnRatio[threadIdY];
-    float ourDivisor = topRowElements[threadIdX];
-    float ourValue = matrixIn[rowOffset + ourCol];
-
-    matrixOut[rowOffset + id_col] = 
-        validLead ? 
-            (weAreLeft ? ourLeadRatio : (safeDivisors[threadIdX] ? (ourLeadRatio - ourValue / ourDivisor) : ourValue)) : 
-            ourValue;    
+        matrixOut[rowOffset + id_col] = 
+            validLead ? 
+                (weAreLeft ? ourLeadRatio : ((fabs(ourDivisor) > 0) ? (ourLeadRatio - ourValue / ourDivisor) : ourValue)) : 
+                ourValue;    
+    }    
 }
