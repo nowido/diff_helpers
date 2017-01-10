@@ -136,8 +136,8 @@ struct Solver
             preferredWorkGroupSizeMultiple = 1;
         }
 
-        workGroupSizeX = 256;    // to do: use preferredWorkGroupSizeMultiple
-        workGroupSizeY = 1;
+        workGroupSizeX = 2;    // to do: use preferredWorkGroupSizeMultiple
+        workGroupSizeY = 8;
 
         for(int i = 0; i < 2; ++i)
         {
@@ -209,8 +209,8 @@ struct Solver
                 // allocate proper local arrays to kernel
 
         clSetKernelArg(eliminatorKernel, 4, workGroupSizeY * sizeof(float), NULL);
-        clSetKernelArg(eliminatorKernel, 5, workGroupSizeX * sizeof(float), NULL);        
-        clSetKernelArg(eliminatorKernel, 6, workGroupSizeX/4 * sizeof(int), NULL);        
+        clSetKernelArg(eliminatorKernel, 5, workGroupSizeX * sizeof(float), NULL);     
+        clSetKernelArg(eliminatorKernel, 6, workGroupSizeX * sizeof(int), NULL);        
         
         size_t workOffset[2];
         size_t workSize[2];
@@ -263,7 +263,7 @@ struct Solver
 
             clSetKernelArg(eliminatorKernel, 7, sizeof(cl_mem), pp + ppInputIndex);
             clSetKernelArg(eliminatorKernel, 8, sizeof(cl_mem), pp + ppOutputIndex);
-
+            
             clEnqueueNDRangeKernel(cmd, eliminatorKernel, 2, workOffset, workSize, localWorkSize, 0, NULL, NULL);
             
             history[top] = left;
