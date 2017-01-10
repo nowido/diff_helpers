@@ -119,8 +119,8 @@ int main()
     slv.useVector(vector);
 
     GetSystemTimeAsFileTime(&before);
-    slv.Solve();
-    //slv.Iterate(3);
+    //slv.Solve();
+    slv.Iterate(3);
     GetSystemTimeAsFileTime(&after);
 
     printf("Execution time: %u ms.\n", timeDifference(&before, &after) / 1000);
