@@ -5,6 +5,16 @@
 
 //-------------------------------------------------------------
 
+typedef void CL_CALLBACK fn_cl_notify
+        (
+            const char *errinfo, 
+            const void *private_info, 
+            size_t cb, 
+            void *user_data
+        );
+
+//-------------------------------------------------------------
+
 struct Solver
 {
     ClPlayground* cl;
@@ -126,7 +136,7 @@ struct Solver
             preferredWorkGroupSizeMultiple = 1;
         }
 
-        workGroupSizeX = 32;    // to do: use preferredWorkGroupSizeMultiple
+        workGroupSizeX = 256;    // to do: use preferredWorkGroupSizeMultiple
         workGroupSizeY = 1;
 
         for(int i = 0; i < 2; ++i)
@@ -192,8 +202,16 @@ struct Solver
         ppInputIndex = 0;
         ppOutputIndex = 1;
 
+                // specify problem dimension to kernel
+
         clSetKernelArg(eliminatorKernel, 0, sizeof(cl_uint), &dimension);
 
+                // allocate proper local arrays to kernel
+
+        clSetKernelArg(eliminatorKernel, 4, workGroupSizeY * sizeof(float), NULL);
+        clSetKernelArg(eliminatorKernel, 5, workGroupSizeX * sizeof(float), NULL);        
+        clSetKernelArg(eliminatorKernel, 6, workGroupSizeX/4 * sizeof(int), NULL);        
+        
         size_t workOffset[2];
         size_t workSize[2];
 
@@ -241,19 +259,13 @@ struct Solver
             clSetKernelArg(eliminatorKernel, 2, sizeof(int), &top);
             clSetKernelArg(eliminatorKernel, 3, sizeof(int), &leadingIndex);
 
-                    // allocate proper local arrays
-
-            clSetKernelArg(eliminatorKernel, 4, workGroupSizeY * 4, NULL);
-            clSetKernelArg(eliminatorKernel, 5, workGroupSizeX * 4, NULL);
-            clSetKernelArg(eliminatorKernel, 6, workGroupSizeX * 4, NULL);
-
-                    //
+                    // ping-ponged input and output resources
 
             clSetKernelArg(eliminatorKernel, 7, sizeof(cl_mem), pp + ppInputIndex);
             clSetKernelArg(eliminatorKernel, 8, sizeof(cl_mem), pp + ppOutputIndex);
 
             clEnqueueNDRangeKernel(cmd, eliminatorKernel, 2, workOffset, workSize, localWorkSize, 0, NULL, NULL);
-
+            
             history[top] = left;
 
                 // prepare next pass
