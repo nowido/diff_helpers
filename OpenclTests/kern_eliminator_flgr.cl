@@ -6,7 +6,7 @@ __kernel void eliminator
                     int leadingIndex,                            
                     __local float* leadColumnRatio, // array of size groupRowsCount
                     __local float* topRowElements, // array of size groupColumnsCount    
-                    __local int* safeD,                                                                      
+                    __local int* safeDivisors, // array of size groupColumnsCount                                                                              
                     __global float* matrixIn, 
                     __global float* matrixOut    
                 )
@@ -20,8 +20,8 @@ __kernel void eliminator
 
     if((id_col < (int)dim) && (id_row <= (int)dim))
     {        
-        size_t threadIdX = get_local_id(0);
-        size_t threadIdY = get_local_id(1);
+        size_t threadIdX = get_local_id(0) % get_local_size (0);
+        size_t threadIdY = get_local_id(1) % get_local_size (1);
 
         bool weAreFirstRowInGroup = (threadIdY == 0);
         bool weAreFirstColumnInGroup = (threadIdX == 0);
@@ -68,7 +68,9 @@ __kernel void eliminator
 
         if(weAreFirstRowInGroup)    
         {
-            topRowElements[threadIdX] = matrixIn[topOffset + ourCol];
+            float ourTopElement = matrixIn[topOffset + ourCol];
+            topRowElements[threadIdX] = ourTopElement;
+            safeDivisors[threadIdX] = (fabs(ourTopElement) > 0) ? 1 : 0;
         }
         
         barrier(CLK_LOCAL_MEM_FENCE);        
@@ -79,9 +81,6 @@ __kernel void eliminator
         float ourDivisor = topRowElements[threadIdX];
         float ourValue = matrixIn[rowOffset + ourCol];
 
-        matrixOut[rowOffset + id_col] = 
-            validLead ? 
-                (weAreLeft ? ourLeadRatio : ((fabs(ourDivisor) > 0) ? (ourLeadRatio - ourValue / ourDivisor) : ourValue)) : 
-                ourValue;    
+        matrixOut[rowOffset + id_col] = weAreLeft ? ourLeadRatio : (safeDivisors[threadIdX] ? (ourLeadRatio - ourValue / ourDivisor) : ourValue);    
     }    
 }
