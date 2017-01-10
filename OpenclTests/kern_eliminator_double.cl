@@ -32,8 +32,5 @@ __kernel void eliminator
     double ourDivisor = matrixIn[topOffset + ourCol];
     double ourValue = matrixIn[rowOffset + ourCol];
 
-    matrixOut[rowOffset + id_col] = 
-        validLead ? 
-            (weAreLeft ? leadSafeRatio : ((fabs(ourDivisor) > 0) ? (leadSafeRatio - ourValue / ourDivisor) : ourValue)) : 
-            ourValue;
+    matrixOut[rowOffset + id_col] = weAreLeft ? leadSafeRatio : ((fabs(ourDivisor) > 0) ? (leadSafeRatio - ourValue / ourDivisor) : ourValue);
 }
