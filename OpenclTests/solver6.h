@@ -116,7 +116,7 @@ struct Solver
 
         cl = useCl;
 
-        dev = cl->gpuDevices[0];
+        dev = cl->cpuDevices[0];
 
         devco = clCreateContext(NULL, 1, &dev, notify, NULL, &errcode);
 
@@ -204,8 +204,7 @@ struct Solver
     bool Solve()
     {
         //debprintMatrix(matrixFp64);
-
-        printf("\n");
+        //printf("\n");
 
             // specify problem dimension to kernels
 
@@ -258,7 +257,11 @@ struct Solver
             for(unsigned int i = 0; i < mapSize; ++i)
             {
                 float fv = mappedBuffer[i];
-                float fav = fabs(fv);
+                //float fav = fabs(fv);
+                float fav = fv;
+
+                    // clear sign bit to get absolute value
+                ((char*)&fav)[3] &= '\x7F';                
 
                 if(fav > maxAbsValue)
                 {
@@ -428,6 +431,8 @@ private:
 
         clEnqueueUnmapMemObject(cmd, workspace, m, 0, NULL, NULL);
     }
+
+public:
 
     /////////////////////////////////////////
     void useLupToSolve(double* x, double* b)
