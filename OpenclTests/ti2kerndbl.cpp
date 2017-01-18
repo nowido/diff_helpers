@@ -141,7 +141,7 @@ void reverseVectorInPlaceFp64(const size_t dimension, double* vector)
 
 int main()
 {
-    const size_t dim = 1000;    
+    const size_t dim = 2000;    
     const size_t matrixElementsCount = dim * dim;
     const size_t matrixBytesCountFp32 = matrixElementsCount * sizeof(double);
 
@@ -186,8 +186,8 @@ int main()
     slv1.useVector(vectorFp64);
 
     gettimeofday(&before, NULL);    
-    //slv1.Solve();    
-    slv1.Iterate(2);    
+    slv1.Solve();    
+    //slv1.Iterate(2);    
     gettimeofday(&after, NULL);
 
     printf("Execution time: %u ms.\n", timeDifference(&before, &after) / 1000);
