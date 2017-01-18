@@ -102,7 +102,7 @@ void addVectorFp64(const size_t dimension, double* vectorDest, double* vectorSrc
 
 int main()
 {
-    const size_t dim = 1000;    
+    const size_t dim = 2000;    
     const size_t matrixElementsCount = dim * dim;
     const size_t matrixBytesCountFp32 = matrixElementsCount * sizeof(float);
 
@@ -148,7 +148,7 @@ int main()
 
     gettimeofday(&before, NULL);
     //slv.Solve();
-    slv.Iterate(2);
+    slv.Iterate(3);
     gettimeofday(&after, NULL);
 
     printf("Execution time: %u ms.\n", timeDifference(&before, &after) / 1000);
