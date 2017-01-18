@@ -116,7 +116,7 @@ struct Solver
 
         cl = useCl;
 
-        dev = cl->cpuDevices[0];
+        dev = cl->gpuDevices[0];
 
         devco = clCreateContext(NULL, 1, &dev, notify, NULL, &errcode);
 
