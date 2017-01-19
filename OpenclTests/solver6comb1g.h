@@ -18,8 +18,7 @@ struct Solver
     cl_command_queue cmd;
     cl_program program;
 
-    cl_kernel colSwapKernel;    
-    cl_kernel rowDivideKernel;
+    cl_kernel colSwapKernel;        
     cl_kernel eliminatorKernel;
 
     cl_event r1mapped;
@@ -72,8 +71,7 @@ struct Solver
         devco(NULL), 
         cmd(NULL), 
         program(NULL), 
-        colSwapKernel(NULL),
-        rowDivideKernel(NULL),
+        colSwapKernel(NULL),        
         eliminatorKernel(NULL), 
         r1mapped(NULL),
         r2mapped(NULL),
@@ -121,8 +119,7 @@ struct Solver
         clReleaseEvent(r1gpuMainDone);
         clReleaseEvent(r2gpuMainDone);
 
-        clReleaseKernel(eliminatorKernel);
-        clReleaseKernel(rowDivideKernel);
+        clReleaseKernel(eliminatorKernel);        
         clReleaseKernel(colSwapKernel);
 
         clReleaseProgram(program); 
@@ -194,11 +191,10 @@ struct Solver
             return false;
         }
 
-        colSwapKernel = clCreateKernel(program, "col_swap", &errcode);
-        rowDivideKernel = clCreateKernel(program, "row_divide", &errcode);
+        colSwapKernel = clCreateKernel(program, "col_swap", &errcode);        
         eliminatorKernel = clCreateKernel(program, "eliminator", &errcode);
 
-        if((colSwapKernel == NULL) || (rowDivideKernel == NULL) || (eliminatorKernel == NULL))
+        if((colSwapKernel == NULL) || (eliminatorKernel == NULL))
         {
             return false;
         }
@@ -325,6 +321,7 @@ struct Solver
 
         bool inconsistent = false;
 
+        int pivotOffset;
         int pivotColIndex;
         float pivotElement;
         float maxAbsValue;
@@ -359,7 +356,7 @@ struct Solver
                                         cmd, 
                                         workspace1, 
                                         step ? CL_FALSE : CL_TRUE, 
-                                        CL_MAP_READ, 
+                                        CL_MAP_READ | CL_MAP_WRITE, 
                                         mapOffset * sizeof(float), 
                                         mapSize * sizeof(float), 
                                         step ? 1 : 0, 
@@ -375,7 +372,7 @@ struct Solver
                                         cmd, 
                                         workspace2, 
                                         step ? CL_FALSE : CL_TRUE, 
-                                        CL_MAP_READ, 
+                                        CL_MAP_READ | CL_MAP_WRITE, 
                                         mapOffset * sizeof(float), 
                                         mapSize * sizeof(float), 
                                         step ? 1 : 0, 
@@ -392,6 +389,7 @@ struct Solver
 
                 // find pivot
 
+            
             pivotColIndex = -1;            
             maxAbsValue = 0;
 
@@ -408,28 +406,41 @@ struct Solver
                 {
                     pivotElement = fv;
                     maxAbsValue = fav;
+                    pivotOffset = i;
                     pivotColIndex = i + step;
                 }
             }
 
+            if(pivotColIndex < 0)
+            {
+                inconsistent = true;                
+            }
+            else
+            {
+                    // divide row by pivotElement
+
+                for(unsigned int i = 0; i < mapSize; ++i)
+                {
+                    if(pivotOffset != (int)i)
+                    {
+                        mappedBuffer1[i] /= pivotElement;    
+                    }
+                }
+            }
+            
                 // unmap r1
 
             clEnqueueUnmapMemObject(cmd, workspace1, mappedBuffer1, 0, NULL, NULL);
                 
                 //
 
-            if(pivotColIndex < 0)
-            {
-                inconsistent = true;                
-            }
-            else if(workSize[0] > 0)
+            if(!inconsistent && (workSize[0] > 0))
             {
                     // enqueue kernels on r1
 
                     // specify global workspace to kernels
 
                 clSetKernelArg(colSwapKernel, 3, sizeof(cl_mem), &workspace1);
-                clSetKernelArg(rowDivideKernel, 2, sizeof(cl_mem), &workspace1);        
                 clSetKernelArg(eliminatorKernel, 2, sizeof(cl_mem), &workspace1);
 
                 permutation1[step] = pivotColIndex;
@@ -443,13 +454,6 @@ struct Solver
 
                     clEnqueueNDRangeKernel(cmd, colSwapKernel, 1, NULL, &dimension, NULL, 0, NULL, NULL);
                 }
-
-                    // divide row by pivotElement
-
-                clSetKernelArg(rowDivideKernel, 0, sizeof(float), &pivotElement);
-                clSetKernelArg(rowDivideKernel, 1, sizeof(cl_uint), &ld);
-
-                clEnqueueNDRangeKernel(cmd, rowDivideKernel, 1, NULL, workSize, NULL, 0, NULL, NULL);
 
                     // eliminate
 
@@ -483,7 +487,25 @@ struct Solver
                 {
                     pivotElement = fv;
                     maxAbsValue = fav;
+                    pivotOffset = i;
                     pivotColIndex = i + step;
+                }
+            }
+                
+            if(pivotColIndex < 0)
+            {
+                inconsistent = true;                
+            }
+            else
+            {
+                    // divide row by pivotElement
+
+                for(unsigned int i = 0; i < mapSize; ++i)
+                {
+                    if(pivotOffset != (int)i)
+                    {
+                        mappedBuffer2[i] /= pivotElement;    
+                    }
                 }
             }
                 
@@ -493,18 +515,13 @@ struct Solver
 
                 //
 
-            if(pivotColIndex < 0)
-            {
-                inconsistent = true;                
-            }
-            else if(workSize[0] > 0)
+            if(!inconsistent && (workSize[0] > 0))
             {
                     // enqueue kernels on r2
                 
                     // specify global workspace to kernels
 
-                clSetKernelArg(colSwapKernel, 3, sizeof(cl_mem), &workspace2);
-                clSetKernelArg(rowDivideKernel, 2, sizeof(cl_mem), &workspace2);        
+                clSetKernelArg(colSwapKernel, 3, sizeof(cl_mem), &workspace2);                
                 clSetKernelArg(eliminatorKernel, 2, sizeof(cl_mem), &workspace2);
                 
                 permutation2[step] = pivotColIndex;
@@ -518,13 +535,6 @@ struct Solver
 
                     clEnqueueNDRangeKernel(cmd, colSwapKernel, 1, NULL, &dimension, NULL, 0, NULL, NULL);
                 }
-
-                    // divide row by pivotElement
-
-                clSetKernelArg(rowDivideKernel, 0, sizeof(float), &pivotElement);
-                clSetKernelArg(rowDivideKernel, 1, sizeof(cl_uint), &ld);
-
-                clEnqueueNDRangeKernel(cmd, rowDivideKernel, 1, NULL, workSize, NULL, 0, NULL, NULL);
 
                     // eliminate
 
