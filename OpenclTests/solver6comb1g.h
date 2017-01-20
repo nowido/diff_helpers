@@ -3,6 +3,8 @@
 
 #include <string.h>
 
+#include <xmmintrin.h>
+
 #include "ocl_playground.h"
 
 //-------------------------------------------------------------
@@ -285,8 +287,20 @@ struct Solver
     /////////////////////////////////////////
     bool Solve()
     {
-        groupSizeX = 32;
-        groupSizeY = 16;
+        // to do 
+
+        alignas(16) float a[4] = {1, 2, 3, 4};
+        alignas(16) float b[4] = {20, -3, 14, 15};
+        alignas(16) float c[4];
+
+        __m128* a_simd = reinterpret_cast<__m128*>(a);
+        __m128* b_simd = reinterpret_cast<__m128*>(b);
+        __m128* c_simd = reinterpret_cast<__m128*>(c);
+
+        _mm_store_ps(c, _mm_add_ps(*a_simd, *b_simd));
+
+        groupSizeX = 16;
+        groupSizeY = 12;
 
             // specify problem dimension to kernels
 
