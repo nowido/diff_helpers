@@ -433,12 +433,14 @@ struct Solver
             {
                     // divide row by pivotElement
 
-                for(unsigned int i = 0; i < mapSize; ++i)
+                for(unsigned int i = 0; i < pivotOffset; ++i)
                 {
-                    if(pivotOffset != (int)i)
-                    {
-                        mappedBuffer1[i] /= pivotElement;    
-                    }
+                    mappedBuffer1[i] /= pivotElement;    
+                }
+
+                for(unsigned int i = pivotOffset + 1; i < mapSize; ++i)
+                {
+                    mappedBuffer1[i] /= pivotElement;    
                 }
             }
             
@@ -514,12 +516,14 @@ struct Solver
             {
                     // divide row by pivotElement
 
-                for(unsigned int i = 0; i < mapSize; ++i)
+                for(unsigned int i = 0; i < pivotOffset; ++i)
                 {
-                    if(pivotOffset != (int)i)
-                    {
-                        mappedBuffer2[i] /= pivotElement;    
-                    }
+                    mappedBuffer2[i] /= pivotElement;    
+                }
+
+                for(unsigned int i = pivotOffset + 1; i < mapSize; ++i)
+                {
+                    mappedBuffer2[i] /= pivotElement;    
                 }
             }
                 
