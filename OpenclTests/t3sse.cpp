@@ -3,7 +3,17 @@
 #include <string.h>
 #include <math.h>
 
+#include <sys/time.h>
+#include <unistd.h>
+
 #include "solver7sse.h"
+
+//-------------------------------------------------------------
+
+unsigned int timeDifference(struct timeval *before, struct timeval *after)
+{
+    return ((after->tv_sec * 1000000 + after->tv_usec) - (before->tv_sec * 1000000 + before->tv_usec));
+}
 
 //-------------------------------------------------------------
 
@@ -95,6 +105,11 @@ int main()
     float* fp32Vector = (float*)malloc(dim * sizeof(float));
     float* fp32KnownX = (float*)malloc(dim * sizeof(float));
 
+    struct timeval before, after;
+
+    gettimeofday(&before, NULL);
+    srand(before.tv_usec);
+
     Solver slv;
 
     if(!slv.Init(dim))
@@ -119,7 +134,12 @@ int main()
 
     printf("cpus %lu\n", slv.ncpu);
 
+    gettimeofday(&before, NULL);
+    for(int i = 0; i < 10; ++i)
     slv.Solve();
+    gettimeofday(&after, NULL);
+
+    printf("Execution time: %u ms.\n", timeDifference(&before, &after) / 1000);
 
 cleanup:
 
