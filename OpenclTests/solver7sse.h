@@ -12,7 +12,7 @@
 
 #define aligned_alloc(alignment, size) _aligned_malloc((size), (alignment))
 #define aligned_free _aligned_free
-#define align_as(alignment) __declspec(align((alignment)))
+#define align_as(alignment) __declspec(align(alignment))
 
 #else
 
@@ -91,7 +91,7 @@ int init_thread_mutex(thread_mutex* mut)
 #endif
 
 //-------------------------------------------------------------
-
+/*
 struct thread_args_findPivot
 {
     size_t expandedDimension;
@@ -174,7 +174,7 @@ void* thread_proc_findPivot(void* arg)
 
     return NULL;
 }
-
+*/
 //-------------------------------------------------------------
 
 #include <xmmintrin.h>
@@ -187,14 +187,15 @@ struct Solver
     size_t sseBaseCount;
     size_t sseBlockStride;
 
+    /*
     size_t ncpu;
     size_t lastProcessorIndex;
-
+    
     thread_handle* thands_findPivot;
     thread_args_findPivot* targs_findPivot;        
     thread_mutex* toWork_findPivot; 
     thread_mutex* fromWork_findPivot; 
-
+    */
     size_t dimension;
 
     size_t expandedDimension;
@@ -224,10 +225,12 @@ struct Solver
         sseAlignment(16),
         sseBaseCount(4),
         sseBlockStride(16),
+        /*
         thands_findPivot(NULL),
         targs_findPivot(NULL),
         toWork_findPivot(NULL),
         fromWork_findPivot(NULL),
+        */
         fp32Matrix(NULL),
         fp64Matrix(NULL),
         fp64Vector(NULL)        
@@ -236,6 +239,7 @@ struct Solver
     /////////////////////////////////////////
     void Dispose()
     {   
+        /*
         for(size_t i = 0; i < ncpu; ++i)
         {
             destroy_thread_mutex(&(toWork_findPivot[i]));
@@ -246,6 +250,7 @@ struct Solver
         free(targs_findPivot);
         free(toWork_findPivot);
         free(fromWork_findPivot);
+        */
 
         aligned_free(fp32Matrix);     
         aligned_free(fp64Matrix);   
@@ -280,6 +285,7 @@ struct Solver
 
         fp64Vector = (double*)aligned_alloc(sseAlignment, fp64VectorStride); 
 
+        /*
         ncpu = get_ncpu();
 
         if(ncpu == 0)
@@ -312,7 +318,7 @@ struct Solver
 
             thands_findPivot = create_thread(thread_proc_findPivot, (void*)&(targs_findPivot[i]));
         }
-
+        */
         return true;
     }
 
@@ -426,6 +432,7 @@ struct Solver
 private:
 
     /////////////////////////////////////////
+    /*
     int findPivotMt(size_t step)
     {
         int pivotIndex = -1;        
@@ -473,7 +480,7 @@ private:
 
         return pivotIndex;        
     }
-
+    */
     /////////////////////////////////////////
     int findPivot(size_t step)
     {
