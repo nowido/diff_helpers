@@ -141,7 +141,7 @@ int main()
         printf("%d %d\n", c1, c2);
     }
 
-    //printf("cpus %lu\n", slv.ncpu);
+    printf("cpus %lu\n", slv.ncpu);
 
     GetSystemTimeAsFileTime(&before);
     for(int i = 0; i < 10; ++i)
@@ -152,6 +152,8 @@ int main()
 
 cleanup:
 
+    slv.Dispose();
+    
     free(fp32KnownX);
     free(fp32Vector);
     free(fp32Matrix);
