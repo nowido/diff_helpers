@@ -143,6 +143,8 @@ int main()
 
 cleanup:
 
+    slv.Dispose();
+
     free(fp32KnownX);
     free(fp32Vector);
     free(fp32Matrix);
