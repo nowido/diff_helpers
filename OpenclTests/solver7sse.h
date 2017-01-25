@@ -30,172 +30,23 @@ void* aligned_alloc(size_t alignment, size_t size)
 
 #endif
 
-#ifdef _WIN32
-
-//-------------------------------------------------------------
-// threads cross-stuff
-
-#include <windows.h>
-
-#else
-
-#include <sys/types.h>
-#include <sys/sysctl.h>
-#include <pthread.h>
-
-typedef pthread_t thread_handle;
-
-size_t get_ncpu();
-
-size_t get_ncpu()
-{
-    size_t ncpu = 0;
-    size_t len = sizeof(int);
-
-    sysctlbyname("hw.ncpu", &ncpu,	&len, NULL, 0);
-
-    return ncpu;
-}
-
-thread_handle create_thread(void* (*start_routine)(void*), void* arg);
-
-thread_handle create_thread(void* (*start_routine)(void*), void* arg)
-{
-    thread_handle th;
-
-    pthread_create(&th, NULL, start_routine, arg);
-
-    return th;
-}
-
-int join_thread(thread_handle, void** pStatus);
-
-int join_thread(thread_handle thread, void** pStatus)
-{
-    return pthread_join(thread, pStatus);
-}
-
-typedef pthread_mutex_t thread_mutex;
-
-int init_thread_mutex();
-
-int init_thread_mutex(thread_mutex* mut)
-{
-    return pthread_mutex_init(mut, NULL);
-}
-
-#define destroy_thread_mutex pthread_mutex_destroy
-#define thread_mutex_lock pthread_mutex_lock
-#define thread_mutex_unlock pthread_mutex_unlock
-
-#endif
-
-//-------------------------------------------------------------
-/*
-struct thread_args_findPivot
-{
-    size_t expandedDimension;
-    size_t step;
-    float* matrix;
-    
-    size_t start;
-    size_t stop;
-    
-    float maxValue;
-    int pivotIndex;
-
-    thread_mutex* toWork;
-    thread_mutex* fromWork;
-};
-
-void* thread_proc_findPivot(void* arg)
-{
-    thread_args_findPivot* targ = (thread_args_findPivot*)arg;
-
-    thread_mutex* pmTo = targ->toWork;
-    thread_mutex* pmFrom = targ->fromWork;
-
-    size_t expandedDimension = targ->expandedDimension;
-    float* matrix = targ->matrix;
-
-    bool mustWork = true;
-
-        // lock worker while work is not done
-    thread_mutex_lock(pmFrom);
-
-    do
-    {
-            // wait for work from outside
-        thread_mutex_lock(pmTo);
-
-        size_t start = targ->start;
-        size_t stop = targ->stop;
-
-        if(start != stop)
-        {
-                // now work is to do (we have pmFrom locked while work is not done)
-            float maxValue = 0;
-            int pivotIndex = -1;
-
-            for(size_t col = start, scanIndex = (targ->step) * expandedDimension + col; col < stop; ++col, ++scanIndex)
-            {
-                float fv = matrix[scanIndex];
-                float fav = fv;
-
-                    // clear sign bit to get absolute value
-                ((char*)&fav)[3] &= '\x7F';                
-                
-                if(fav > maxValue)
-                {
-                    maxValue = fav;
-                    pivotIndex = col;
-                }
-            }
-
-            targ->pivotIndex = pivotIndex;
-            targ->maxValue = maxValue;
-        }
-        else
-        {
-            // start == stop: worker is asked to terminate            
-            mustWork = false;
-        }
-
-            // done work, release 'requester' to be reused by outside
-        thread_mutex_unlock(pmTo);
-
-            // now work is done, let blocked outside get results
-        thread_mutex_unlock(pmFrom);
-
-            // wait while outside is ready for a new cycle
-        thread_mutex_lock(pmFrom);
-    }
-    while(mustWork);
-
-    return NULL;
-}
-*/
 //-------------------------------------------------------------
 
 #include <xmmintrin.h>
 
+#include "threadpool.h"
+
 //-------------------------------------------------------------
 
-struct Solver
+struct Solver : public ThreadPool
 {
     size_t sseAlignment;
     size_t sseBaseCount;
     size_t sseBlockStride;
-
-    /*
+    
     size_t ncpu;
     size_t lastProcessorIndex;
     
-    thread_handle* thands_findPivot;
-    thread_args_findPivot* targs_findPivot;        
-    thread_mutex* toWork_findPivot; 
-    thread_mutex* fromWork_findPivot; 
-    */
     size_t dimension;
 
     size_t expandedDimension;
@@ -220,46 +71,59 @@ struct Solver
 
     double* fp64Vector;
 
+    static const int STOP = 0;
+    static const int FIND_PIVOT = 1;
+
+    struct TaskItem
+    {
+        int code;
+        
+        size_t step;
+        float maxAbsValue;
+        int pivotIndex;
+
+        // ... and anything
+    };
+
+    TaskItem* taskItems;
+
     /////////////////////////////////////////
-    Solver() :
+    Solver() :        
         sseAlignment(16),
         sseBaseCount(4),
         sseBlockStride(16),
-        /*
-        thands_findPivot(NULL),
-        targs_findPivot(NULL),
-        toWork_findPivot(NULL),
-        fromWork_findPivot(NULL),
-        */
         fp32Matrix(NULL),
         fp64Matrix(NULL),
-        fp64Vector(NULL)        
+        fp64Vector(NULL),
+        taskItems(NULL)        
     {}
 
     /////////////////////////////////////////
     void Dispose()
     {   
-        /*
-        for(size_t i = 0; i < ncpu; ++i)
-        {
-            destroy_thread_mutex(&(toWork_findPivot[i]));
-            destroy_thread_mutex(&(fromWork_findPivot[i]));
-        }
+        chargeStop();
+        WaitResults();
 
-        free(thands_findPivot);
-        free(targs_findPivot);
-        free(toWork_findPivot);
-        free(fromWork_findPivot);
-        */
+        ThreadPool::Dispose();
 
         aligned_free(fp32Matrix);     
         aligned_free(fp64Matrix);   
         aligned_free(fp64Vector);     
+
+        free(taskItems);
     }
 
     /////////////////////////////////////////
     bool Init(size_t useDimension)
     {
+        ncpu = get_ncpu() - 1;
+        lastProcessorIndex = ncpu - 1;
+
+        if(!ThreadPool::Init(ncpu))
+        {
+            return false;
+        }
+
         dimension = useDimension;
 
         fp32VectorSize = dimension * sizeof(float);        
@@ -285,40 +149,8 @@ struct Solver
 
         fp64Vector = (double*)aligned_alloc(sseAlignment, fp64VectorStride); 
 
-        /*
-        ncpu = get_ncpu();
+        taskItems = (TaskItem*)malloc(ThreadPool::capacity * sizeof(TaskItem));
 
-        if(ncpu == 0)
-        {
-            return false;
-        }
-
-        lastProcessorIndex = ncpu - 1;
-
-        thands_findPivot = (thread_handle*)malloc(ncpu * sizeof(thread_handle));
-        targs_findPivot = (thread_args_findPivot*)malloc(ncpu * sizeof(thread_args_findPivot));
-        toWork_findPivot = (thread_mutex*)malloc(ncpu * sizeof(thread_mutex));
-        fromWork_findPivot = (thread_mutex*)malloc(ncpu * sizeof(thread_mutex));
-
-        for(size_t i = 0; i < ncpu; ++i)
-        {
-            thread_mutex* pmTo = &(toWork_findPivot[i]);
-            thread_mutex* pmFrom = &(fromWork_findPivot[i]);
-
-            init_thread_mutex(pmTo);
-            init_thread_mutex(pmFrom);
-            
-            targs_findPivot[i].expandedDimension = expandedDimension;
-            targs_findPivot[i].matrix = fp32Matrix;
-
-            targs_findPivot[i].toWork = pmTo;
-            targs_findPivot[i].fromWork = pmFrom;
-
-            thread_mutex_lock(pmTo);    // no work yet
-
-            thands_findPivot = create_thread(thread_proc_findPivot, (void*)&(targs_findPivot[i]));
-        }
-        */
         return true;
     }
 
@@ -395,17 +227,11 @@ struct Solver
     /////////////////////////////////////////
     bool Solve()
     {
-        /*
-        thread_handle th = create_thread(thread_proc, NULL);
-        void* result;
-        join_thread(th, &result);
-        */
-
         for(size_t step = 0; step < dimension; ++step)        
         {            
-            int pivotIndex = sseFindPivot(step);
+            //int pivotIndex = sseFindPivot(step);
             //int pivotIndex = findPivot(step);
-            //int pivotIndex = findPivotMt(step);
+            int pivotIndex = findPivotMt(step);
             /*
             if(pivotIndex != pivotIndex2)
             {
@@ -425,6 +251,24 @@ struct Solver
             // divide elements in 'step' row
             // process main block of values 
         }
+        
+        return true;
+    }
+
+protected:
+    
+    virtual bool ProcessTask(int index)
+    {
+        int code = taskItems[index].code;
+
+        if(code == Solver::STOP)
+        {
+            return false;
+        }
+        else if(code == FIND_PIVOT)
+        {
+            kernelFindPivot(index);            
+        }
 
         return true;
     }
@@ -432,6 +276,97 @@ struct Solver
 private:
 
     /////////////////////////////////////////
+    void chargeStop()
+    {
+        for(size_t i = 0; i < ThreadPool::capacity; ++i)
+        {
+            taskItems[i].code = Solver::STOP;            
+        }        
+    }
+
+    /////////////////////////////////////////
+    void chargeKernelFindPivot(size_t step)
+    {
+        for(size_t i = 0; i < ThreadPool::capacity; ++i)
+        {
+            taskItems[i].code = Solver::FIND_PIVOT;
+            taskItems[i].step = step;
+        }
+    }
+
+    int gatherPivotIndex()
+    {
+        float maxAbsValue = 0;
+        int pivotIndex = -1;
+
+        for(size_t i = 0; i < ThreadPool::capacity; ++i)
+        {
+            if(taskItems[i].maxAbsValue > maxAbsValue)
+            {
+                maxAbsValue = taskItems[i].maxAbsValue;
+                pivotIndex = taskItems[i].pivotIndex;
+            }
+        }    
+
+        return pivotIndex;    
+    }
+    
+    void kernelFindPivot(int index)
+    {
+        size_t step = taskItems[index].step;
+
+        size_t workSize = dimension - step;        
+        size_t workItemSize = workSize / ThreadPool::capacity;
+                
+        size_t start = step + index * workItemSize;
+        size_t stop = (index == lastProcessorIndex) ? dimension : (start + workItemSize);
+
+        float* pScan = fp32Matrix + step * expandedDimension + start;
+
+        float maxValue = 0;
+        int pivotIndex = -1;
+
+        for(size_t i = start; i < stop; ++i, ++pScan)
+        {
+            float fv = *pScan;
+            float fav = fv;
+
+                // clear sign bit to get absolute value
+            ((char*)&fav)[3] &= '\x7F';                
+            
+            if(fav > maxValue)
+            {
+                maxValue = fav;
+                pivotIndex = i;
+            }
+        }
+
+        taskItems[index].maxAbsValue = maxValue;
+        taskItems[index].pivotIndex = pivotIndex;        
+    }
+
+    int findPivotMt(size_t step)
+    {
+        size_t workSize = dimension - step;
+
+        if(workSize < 256)
+        {
+            return findPivot(step);
+        }
+        else
+        {
+            chargeKernelFindPivot(step);        
+            
+            WaitResults();
+
+            int pivotIndex = gatherPivotIndex();
+
+            Recharge();
+
+            return pivotIndex;
+        }        
+    }
+
     /*
     int findPivotMt(size_t step)
     {
@@ -486,7 +421,7 @@ private:
     {
         int pivotIndex = -1;        
         float maxValue = 0;
-        
+            
         for(size_t col = step, scanIndex = step * expandedDimension + col; col < dimension; ++col, ++scanIndex)
         {
             float fv = fp32Matrix[scanIndex];
