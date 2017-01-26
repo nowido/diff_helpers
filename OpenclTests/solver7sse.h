@@ -116,7 +116,7 @@ struct Solver : public ThreadPool
     /////////////////////////////////////////
     bool Init(size_t useDimension)
     {
-        ncpu = get_ncpu() - 1;
+        ncpu = get_ncpu();
         lastProcessorIndex = ncpu - 1;
 
         if(!ThreadPool::Init(ncpu))
