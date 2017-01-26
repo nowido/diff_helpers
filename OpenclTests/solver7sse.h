@@ -73,6 +73,9 @@ struct Solver : public ThreadPool
 
     static const int STOP = 0;
     static const int FIND_PIVOT = 1;
+    static const int SWAP_COLUMNS = 2;
+    static const int DIVIDE_ROW_ELEMENTS = 3;
+    static const int PROCESS_MAIN_BLOCK = 4;
 
     struct TaskItem
     {
@@ -81,7 +84,8 @@ struct Solver : public ThreadPool
         size_t step;
         float maxAbsValue;
         int pivotIndex;
-
+        size_t c1;
+        size_t c2;
         // ... and anything
     };
 
@@ -116,7 +120,7 @@ struct Solver : public ThreadPool
     /////////////////////////////////////////
     bool Init(size_t useDimension)
     {
-        ncpu = get_ncpu();
+        ncpu = get_ncpu();                     
         lastProcessorIndex = ncpu - 1;
 
         if(!ThreadPool::Init(ncpu))
@@ -233,9 +237,12 @@ struct Solver : public ThreadPool
             //int pivotIndex = findPivot(step);
             int pivotIndex = findPivotMt(step);
             /*
-            if(pivotIndex != pivotIndex2)
+            float pv = fp32Matrix[step * expandedDimension + pivotIndex];
+            float pv2 = fp32Matrix[step * expandedDimension + pivotIndex2];
+
+            if(pv != pv2)
             {
-                printf("!%d %d ", pivotIndex, pivotIndex2);
+                printf("!%.0f %.0f ", pv, pv2);
             }
             */
             if(pivotIndex < 0)
@@ -245,11 +252,15 @@ struct Solver : public ThreadPool
             
             if(pivotIndex != step)
             {
-                // swap cols
+                //swapColumns(step, pivotIndex);
+                swapColumnsMt(step, pivotIndex);
             }
             
-            // divide elements in 'step' row
-            // process main block of values 
+            //divideRowElements(step);
+            divideRowElementsMt(step);
+
+            //processMainBlock(step);            
+            processMainBlockMt(step);
         }
         
         return true;
@@ -261,7 +272,7 @@ protected:
     {
         int code = taskItems[index].code;
 
-        if(code == Solver::STOP)
+        if(code == STOP)
         {
             return false;
         }
@@ -269,7 +280,19 @@ protected:
         {
             kernelFindPivot(index);            
         }
-
+        else if(code == SWAP_COLUMNS)
+        {
+            kernelSwapColumns(index);            
+        }
+        else if(code == DIVIDE_ROW_ELEMENTS)
+        {
+            kernelDivideRowElements(index);
+        }
+        else if(code == PROCESS_MAIN_BLOCK)
+        {
+            kernelProcessMainBlock(index);
+        }
+        
         return true;
     }
 
@@ -289,7 +312,7 @@ private:
     {
         for(size_t i = 0; i < ThreadPool::capacity; ++i)
         {
-            taskItems[i].code = Solver::FIND_PIVOT;
+            taskItems[i].code = FIND_PIVOT;
             taskItems[i].step = step;
         }
     }
@@ -315,20 +338,16 @@ private:
     {
         size_t step = taskItems[index].step;
 
-        size_t workSize = dimension - step;        
-        size_t workItemSize = workSize / ThreadPool::capacity;
-                
-        size_t start = step + index * workItemSize;
-        size_t stop = (index == lastProcessorIndex) ? dimension : (start + workItemSize);
+        size_t start = step + index;
 
-        float* pScan = fp32Matrix + step * expandedDimension + start;
+        float* pScan = fp32Matrix + step * expandedDimension;
 
         float maxValue = 0;
         int pivotIndex = -1;
 
-        for(size_t i = start; i < stop; ++i, ++pScan)
+        for(size_t i = start; i < dimension; i += ThreadPool::capacity)
         {
-            float fv = *pScan;
+            float fv = pScan[i];
             float fav = fv;
 
                 // clear sign bit to get absolute value
@@ -346,7 +365,7 @@ private:
     }
 
     int findPivotMt(size_t step)
-    {
+    {        
         size_t workSize = dimension - step;
 
         if(workSize < 256)
@@ -366,57 +385,7 @@ private:
             return pivotIndex;
         }        
     }
-
-    /*
-    int findPivotMt(size_t step)
-    {
-        int pivotIndex = -1;        
-        float maxValue = 0;
-        
-        size_t workSize = dimension - step;
-
-        if(workSize < 64)
-        {
-            return findPivot(step);
-        }
-
-        size_t workItemSize = workSize / ncpu;
-
-        thread_handle thands[ncpu];
-        thread_args_findPivot targs[ncpu];        
-
-        for(size_t i = 0, loaded = 0; i < ncpu; ++i)
-        {               
-            targs[i].expandedDimension = expandedDimension;
-            targs[i].step = step;
-            targs[i].matrix = fp32Matrix;         
-
-            targs[i].start = step + loaded;
-            loaded += workItemSize;
-            targs[i].stop = (i < lastProcessorIndex) ? (step + loaded) : dimension;
-
-            targs[i].maxValue = 0;
-            targs[i].pivotIndex = -1;
-
-            thands[i] = create_thread(thread_proc_findPivot, (void*)&(targs[i]));
-        }
-
-        for(size_t i = 0; i < ncpu; ++i)
-        {
-            void* retValue;
-            join_thread(thands[i], &retValue);
-
-            if(targs[i].maxValue > maxValue)
-            {
-                maxValue = targs[i].maxValue;
-                pivotIndex = targs[i].pivotIndex;
-            }
-        }
-
-        return pivotIndex;        
-    }
-    */
-    /////////////////////////////////////////
+    
     int findPivot(size_t step)
     {
         int pivotIndex = -1;        
@@ -440,7 +409,6 @@ private:
         return pivotIndex;        
     }
 
-    /////////////////////////////////////////
     int sseFindPivot(size_t step)
     {
         int pivotIndex = -1;        
@@ -534,7 +502,252 @@ private:
         }
 
         return pivotIndex;
-    }        
+    }     
+
+    /////////////////////////////////////////
+    void chargeKernelSwapColumns(size_t c1, size_t c2)
+    {
+        for(size_t i = 0; i < ThreadPool::capacity; ++i)
+        {
+            taskItems[i].code = SWAP_COLUMNS;
+            taskItems[i].c1 = c1;
+            taskItems[i].c2 = c2;
+        }
+    }
+
+    void kernelSwapColumns(int index)
+    {
+        size_t c1 = taskItems[index].c1;
+        size_t c2 = taskItems[index].c2;
+
+        float* pScan1 = fp32Matrix + c1;
+        float* pScan2 = fp32Matrix + c2;
+
+        size_t skipSize = expandedDimension * ThreadPool::capacity;
+
+        for(size_t i = 0; i < dimension; i += ThreadPool::capacity, pScan1 += skipSize, pScan2 += skipSize)
+        {
+            float t = *pScan1;
+            *pScan1 = *pScan2;
+            *pScan2 = t;            
+        }
+    }
+
+    void swapColumnsMt(size_t c1, size_t c2)
+    {
+        chargeKernelSwapColumns(c1, c2);        
+        
+        WaitResults();
+
+        Recharge();
+    }
+
+    void swapColumns(size_t c1, size_t c2)
+    {
+        float* pScan1 = fp32Matrix + c1;
+        float* pScan2 = fp32Matrix + c2;
+
+        for(size_t i = 0; i < dimension; ++i, pScan1 += expandedDimension, pScan2 += expandedDimension)
+        {
+            float t = *pScan1;
+            *pScan1 = *pScan2;
+            *pScan2 = t;
+        }
+    }           
+
+    /////////////////////////////////////////
+    void chargeKernelDivideRowElements(size_t step)
+    {
+        for(size_t i = 0; i < ThreadPool::capacity; ++i)
+        {
+            taskItems[i].code = DIVIDE_ROW_ELEMENTS;
+            taskItems[i].step = step;            
+        }
+    }
+
+    void kernelDivideRowElements(int index)
+    {
+        size_t step = taskItems[index].step;
+
+        float* pScan = fp32Matrix + step * expandedDimension + step;
+
+        float divisor = *pScan;
+
+        size_t offset = index + 1;
+
+        pScan += offset;
+
+        for(size_t i = step + offset; i < dimension; i += ThreadPool::capacity, pScan += ThreadPool::capacity)
+        {
+            *pScan /= divisor;
+        }
+    }
+
+    void divideRowElementsMt(size_t step)
+    {
+        size_t workSize = dimension - step;
+
+        if(workSize < 256)
+        {
+            divideRowElements(step);
+        }
+        else
+        {
+            chargeKernelDivideRowElements(step);        
+            
+            WaitResults();
+
+            Recharge();
+        }        
+    }
+
+    void divideRowElements(size_t step)
+    {
+        float* pScan = fp32Matrix + step * expandedDimension + step;
+
+        float divisor = *pScan;
+
+        ++pScan;
+
+        for(size_t i = step + 1; i < dimension; ++i, ++pScan)
+        {
+            *pScan /= divisor;
+        }
+    }
+
+    /////////////////////////////////////////
+    void chargeKernelProcessMainBlock(size_t step)
+    {
+        for(size_t i = 0; i < ThreadPool::capacity; ++i)
+        {
+            taskItems[i].code = PROCESS_MAIN_BLOCK;
+            taskItems[i].step = step;            
+        }
+    }
+
+    /*
+    void kernelProcessMainBlock(int index)
+    {        
+        size_t step = taskItems[index].step;
+
+        float* pLdRow = fp32Matrix + step * expandedDimension;
+
+        float* pScanRow = pLdRow + expandedDimension * (index + 1);
+
+        size_t offset = step + 1;
+
+        size_t skipSize = expandedDimension * ThreadPool::capacity;
+
+        for(size_t row = offset + index; row < dimension; row += ThreadPool::capacity, pScanRow += skipSize)
+        {
+            float leadColElement = pScanRow[step];
+
+            for(size_t col = offset; col < dimension; ++col)
+            {
+                pScanRow[col] -= leadColElement * pLdRow[col];
+            }
+        }
+    }    
+    */
+
+        // SSE version
+    void kernelProcessMainBlock(int index)
+    {                
+        size_t step = taskItems[index].step;
+
+        size_t offset = step + 1;
+
+            // find nearest block-aligned index
+
+        size_t blockAlignedIndex = offset / sseBaseCount;
+        bool lastBlock = (blockAlignedIndex == lastBlockIndex);
+        blockAlignedIndex *= sseBaseCount;
+
+        size_t sseSkipCount = offset - blockAlignedIndex;
+
+        size_t sseStop = lastBlock ? (extra ? extra : sseBaseCount) : sseBaseCount;        
+
+        size_t sseRunCount = (dimension - offset) / sseBaseCount;
+
+            // tmp buffers to manipulate sse blocks
+
+        align_as(16) float bufLd[4]; 
+        __m128* pBufLd = (__m128*)bufLd;
+            
+        align_as(16) float bufM[4]; 
+        __m128* pBufM = (__m128*)bufM;
+
+            //
+
+        float* pLdRow = fp32Matrix + step * expandedDimension;
+
+        float* pScanRow = pLdRow + expandedDimension * (index + 1);
+        
+        size_t skipSize = expandedDimension * ThreadPool::capacity;
+
+            //
+
+        for(size_t row = offset + index; row < dimension; row += ThreadPool::capacity, pScanRow += skipSize)
+        {
+            float leadColElement = pScanRow[step];
+
+            size_t col = offset;
+
+            for(size_t i = sseSkipCount; i < sseStop; ++i, ++col)
+            {
+                pScanRow[col] -= leadColElement * pLdRow[col];
+            }
+
+            if(col < dimension)
+            {
+
+            }
+
+            // for sseRunCount
+
+            *pBufLd = _mm_load_ps(pLdRow + blockAlignedIndex);    
+            *pBufM = _mm_load_ps(pScanRow + blockAlignedIndex);
+            
+        }
+    }    
+
+    void processMainBlockMt(size_t step)
+    {
+        size_t workSize = dimension - step;
+        workSize *= workSize;
+
+        if(workSize < 16 * 16)
+        {
+            processMainBlock(step);
+        }
+        else
+        {
+            chargeKernelProcessMainBlock(step);        
+            
+            WaitResults();
+
+            Recharge();
+        }        
+    }
+
+    void processMainBlock(size_t step)
+    {        
+        float* pLdRow = fp32Matrix + step * expandedDimension;
+
+        float* pScanRow = pLdRow + expandedDimension;
+
+        size_t offset = step + 1;
+
+        for(size_t row = offset; row < dimension; ++row, pScanRow += expandedDimension)
+        {
+            float leadColElement = pScanRow[step];
+
+            for(size_t col = offset; col < dimension; ++col)
+            {
+                pScanRow[col] -= leadColElement * pLdRow[col];
+            }
+        }
+    }    
 };
 
 //-------------------------------------------------------------
