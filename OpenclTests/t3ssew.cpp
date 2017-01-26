@@ -144,7 +144,7 @@ int main()
     printf("cpus %lu\n", slv.ncpu);
 
     GetSystemTimeAsFileTime(&before);
-    for(int i = 0; i < 10; ++i)
+    for(int i = 0; i < 2; ++i)
     slv.Solve();
     GetSystemTimeAsFileTime(&after);
 
