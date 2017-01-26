@@ -1,14 +1,76 @@
 #ifndef THREADPOOL_H
 #define THREADPOOL_H
 
-#ifdef _WIN32
-
 //-------------------------------------------------------------
 // threads cross-stuff
+//-------------------------------------------------------------
+
+#ifdef _WIN32
 
 #include <windows.h>
 
-#else
+typedef HANDLE thread_handle;
+
+typedef DWORD thread_ret;
+typedef void* thread_arg;
+
+typedef HANDLE thread_mutex;
+
+typedef thread_ret (*pthread_routine)(thread_arg);
+
+size_t get_ncpu();
+
+thread_handle create_thread(pthread_routine start_routine, thread_arg arg);
+int thread_join(thread_handle, thread_ret* pStatus);
+
+int thread_mutex_init();
+int thread_mutex_destroy(thread_mutex* mut);
+int thread_mutex_lock(thread_mutex* mut);
+int thread_mutex_unlock(thread_mutex* mut);
+
+size_t get_ncpu()
+{
+    SYSTEM_INFO si;
+
+    GetSystemInfo(&si);
+
+    return si.dwNumberOfProcessors;
+}
+
+thread_handle create_thread(pthread_routine start_routine, thread_arg arg)
+{
+    DWORD tid;
+    
+    return CreateThread(NULL, 0, start_routine, arg, 0, &tid);
+}
+
+int thread_join(thread_handle thread, thread_ret* pStatus)
+{    
+    *pStatus = 0;
+    return WaitForSingleObject(thread, INFINITE);
+}
+
+int thread_mutex_init(thread_mutex* mut)
+{
+    return (*mut = CreateMutex(NULL, FALSE, NULL)) ? 0 : 1;
+}
+
+int thread_mutex_destroy(thread_mutex* mut)
+{
+    return CloseHandle(*mut) ? 0 : 1;
+}
+
+int thread_mutex_lock(thread_mutex* mut)
+{
+    return WaitForSingleObject(*mut, INFINITE);
+}
+
+int thread_mutex_unlock(thread_mutex* mut)
+{
+    return ReleaseMutex(*mut) ? 0 : 1;
+}
+
+#else // POSIX stuff
 
 #include <sys/types.h>
 #include <sys/sysctl.h>
@@ -21,7 +83,17 @@ typedef void* thread_arg;
 
 typedef thread_ret (*pthread_routine)(thread_arg);
 
+typedef pthread_mutex_t thread_mutex;
+
 size_t get_ncpu();
+
+thread_handle create_thread(pthread_routine start_routine, thread_arg arg);
+int thread_join(thread_handle, thread_ret* pStatus);
+int thread_mutex_init();
+
+#define thread_mutex_destroy pthread_mutex_destroy
+#define thread_mutex_lock pthread_mutex_lock
+#define thread_mutex_unlock pthread_mutex_unlock
 
 size_t get_ncpu()
 {
@@ -33,8 +105,6 @@ size_t get_ncpu()
     return ncpu;
 }
 
-thread_handle create_thread(pthread_routine start_routine, thread_arg arg);
-
 thread_handle create_thread(pthread_routine start_routine, thread_arg arg)
 {
     thread_handle th;
@@ -44,25 +114,15 @@ thread_handle create_thread(pthread_routine start_routine, thread_arg arg)
     return th;
 }
 
-int thread_join(thread_handle, thread_ret* pStatus);
-
 int thread_join(thread_handle thread, thread_ret* pStatus)
 {
     return pthread_join(thread, pStatus);
 }
 
-typedef pthread_mutex_t thread_mutex;
-
-int thread_mutex_init();
-
 int thread_mutex_init(thread_mutex* mut)
 {
     return pthread_mutex_init(mut, NULL);
 }
-
-#define thread_mutex_destroy pthread_mutex_destroy
-#define thread_mutex_lock pthread_mutex_lock
-#define thread_mutex_unlock pthread_mutex_unlock
 
 #endif
 
