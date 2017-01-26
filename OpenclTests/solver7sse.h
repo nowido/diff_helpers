@@ -77,6 +77,9 @@ struct Solver : public ThreadPool
     static const int DIVIDE_ROW_ELEMENTS = 3;
     static const int PROCESS_MAIN_BLOCK = 4;
 
+    static const size_t LinearMinMtWorksize = 64;
+    static const size_t SquareMinMtWorksize = 8 * 8;
+
     struct TaskItem
     {
         int code;
@@ -120,7 +123,7 @@ struct Solver : public ThreadPool
     /////////////////////////////////////////
     bool Init(size_t useDimension)
     {
-        ncpu = get_ncpu();                     
+        ncpu = get_ncpu();                                                  
         lastProcessorIndex = ncpu - 1;
 
         if(!ThreadPool::Init(ncpu))
@@ -368,7 +371,7 @@ private:
     {        
         size_t workSize = dimension - step;
 
-        if(workSize < 256)
+        if(workSize < LinearMinMtWorksize)
         {
             return findPivot(step);
         }
@@ -565,6 +568,7 @@ private:
         }
     }
 
+    //*
     void kernelDivideRowElements(int index)
     {
         size_t step = taskItems[index].step;
@@ -582,12 +586,52 @@ private:
             *pScan /= divisor;
         }
     }
+    //*/
+
+        // SSE version, to do
+    /*
+    void kernelDivideRowElements(int index)
+    {
+        size_t step = taskItems[index].step;
+
+            // find nearest block-aligned index
+
+        size_t blockAlignedIndex = offset / sseBaseCount;        
+        blockAlignedIndex *= sseBaseCount;
+
+        size_t runStart = blockAlignedIndex + ((offset > blockAlignedIndex) ? sseBaseCount : 0);
+
+            // tmp buffers to manipulate sse blocks
+
+        align_as(16) float bufLd[4]; 
+        __m128* pBufLd = (__m128*)bufLd;
+            
+        align_as(16) float bufM[4]; 
+        __m128* pBufM = (__m128*)bufM;
+
+        align_as(16) float bufLdCol[4]; 
+        __m128* pBufLdCol = (__m128*)bufLdCol;
+
+        float* pScan = fp32Matrix + step * expandedDimension + step;
+
+        float divisor = *pScan;
+
+        size_t offset = index + 1;
+
+        pScan += offset;
+
+        for(size_t i = step + offset; i < dimension; i += ThreadPool::capacity, pScan += ThreadPool::capacity)
+        {
+            *pScan /= divisor;
+        }
+    }
+    */
 
     void divideRowElementsMt(size_t step)
     {
         size_t workSize = dimension - step;
 
-        if(workSize < 256)
+        if(workSize < LinearMinMtWorksize)
         {
             divideRowElements(step);
         }
@@ -651,6 +695,7 @@ private:
     */
 
         // SSE version
+    //*    
     void kernelProcessMainBlock(int index)
     {                
         size_t step = taskItems[index].step;
@@ -659,15 +704,10 @@ private:
 
             // find nearest block-aligned index
 
-        size_t blockAlignedIndex = offset / sseBaseCount;
-        bool lastBlock = (blockAlignedIndex == lastBlockIndex);
+        size_t blockAlignedIndex = offset / sseBaseCount;        
         blockAlignedIndex *= sseBaseCount;
 
-        size_t sseSkipCount = offset - blockAlignedIndex;
-
-        size_t sseStop = lastBlock ? (extra ? extra : sseBaseCount) : sseBaseCount;        
-
-        size_t sseRunCount = (dimension - offset) / sseBaseCount;
+        size_t runStart = blockAlignedIndex + ((offset > blockAlignedIndex) ? sseBaseCount : 0);
 
             // tmp buffers to manipulate sse blocks
 
@@ -676,6 +716,9 @@ private:
             
         align_as(16) float bufM[4]; 
         __m128* pBufM = (__m128*)bufM;
+
+        align_as(16) float bufLdCol[4]; 
+        __m128* pBufLdCol = (__m128*)bufLdCol;
 
             //
 
@@ -689,34 +732,41 @@ private:
 
         for(size_t row = offset + index; row < dimension; row += ThreadPool::capacity, pScanRow += skipSize)
         {
-            float leadColElement = pScanRow[step];
+                // load 1 (may be, unaligned) element
+            bufLdCol[0] = pScanRow[step];
 
+                // copy element into all 4 words of aligned buffer
+            *pBufLdCol = _mm_load1_ps(bufLdCol);
+
+                // move to aligned run start
             size_t col = offset;
 
-            for(size_t i = sseSkipCount; i < sseStop; ++i, ++col)
+            for(; col < runStart; ++col)
             {
-                pScanRow[col] -= leadColElement * pLdRow[col];
+                pScanRow[col] -= bufLdCol[0] * pLdRow[col];
             }
 
-            if(col < dimension)
+                // do main run
+            for(; col < dimension; col += sseBaseCount)
             {
+                float *p = pScanRow + col;
 
-            }
+                    // [col] is block aligned
+                *pBufLd = _mm_load_ps(pLdRow + col);    
+                *pBufM = _mm_load_ps(p);
 
-            // for sseRunCount
-
-            *pBufLd = _mm_load_ps(pLdRow + blockAlignedIndex);    
-            *pBufM = _mm_load_ps(pScanRow + blockAlignedIndex);
-            
+                _mm_store_ps(p, _mm_sub_ps(*pBufM, _mm_mul_ps(*pBufLdCol, *pBufLd)));
+            }            
         }
     }    
+    //*/
 
     void processMainBlockMt(size_t step)
     {
         size_t workSize = dimension - step;
         workSize *= workSize;
 
-        if(workSize < 16 * 16)
+        if(workSize < SquareMinMtWorksize)
         {
             processMainBlock(step);
         }
