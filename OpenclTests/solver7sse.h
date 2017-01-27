@@ -702,6 +702,12 @@ private:
 
         size_t offset = step + 1;
 
+        float* pLdRow = fp32Matrix + step * expandedDimension;
+
+        float* pScanRow = pLdRow + expandedDimension * (index + 1);
+        
+        size_t skipSize = expandedDimension * ThreadPool::capacity;
+
             // find nearest block-aligned index
 
         size_t blockAlignedIndex = offset / sseBaseCount;        
@@ -709,24 +715,10 @@ private:
 
         size_t runStart = blockAlignedIndex + ((offset > blockAlignedIndex) ? sseBaseCount : 0);
 
-            // tmp buffers to manipulate sse blocks
-
-        align_as(16) float bufLd[4]; 
-        __m128* pBufLd = (__m128*)bufLd;
-            
-        align_as(16) float bufM[4]; 
-        __m128* pBufM = (__m128*)bufM;
+            // tmp buffer to manipulate sse blocks
 
         align_as(16) float bufLdCol[4]; 
         __m128* pBufLdCol = (__m128*)bufLdCol;
-
-            //
-
-        float* pLdRow = fp32Matrix + step * expandedDimension;
-
-        float* pScanRow = pLdRow + expandedDimension * (index + 1);
-        
-        size_t skipSize = expandedDimension * ThreadPool::capacity;
 
             //
 
@@ -734,9 +726,6 @@ private:
         {
                 // load 1 (may be, unaligned) element
             bufLdCol[0] = pScanRow[step];
-
-                // copy element into all 4 words of aligned buffer
-            *pBufLdCol = _mm_load1_ps(bufLdCol);
 
                 // move to aligned run start
             size_t col = offset;
@@ -746,16 +735,17 @@ private:
                 pScanRow[col] -= bufLdCol[0] * pLdRow[col];
             }
 
+                // copy element into all 4 words of aligned buffer            
+            __m128 ldCol = _mm_load1_ps(bufLdCol);
+
                 // do main run
             for(; col < dimension; col += sseBaseCount)
             {
+                // [col] is block aligned
+
                 float *p = pScanRow + col;
-
-                    // [col] is block aligned
-                *pBufLd = _mm_load_ps(pLdRow + col);    
-                *pBufM = _mm_load_ps(p);
-
-                _mm_store_ps(p, _mm_sub_ps(*pBufM, _mm_mul_ps(*pBufLdCol, *pBufLd)));
+                   
+                _mm_store_ps(p, _mm_sub_ps(_mm_load_ps(p), _mm_mul_ps(ldCol, _mm_load_ps(pLdRow + col))));
             }            
         }
     }    
