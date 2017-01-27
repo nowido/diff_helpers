@@ -52,53 +52,9 @@ void fillTestSystem(const size_t dimension, float* knownX, float* matrix, float*
 
 //-------------------------------------------------------------
 
-int CompareResources1(const size_t dimension, float* matrix1, size_t stride1, float* matrix2, size_t stride2)
-{
-    int count = 0;
-
-    for(size_t row = 0; row < dimension; ++row)
-    {
-        for(size_t col = 0; col < dimension; ++col)
-        {
-            size_t srcIndex = row * stride1 + col;
-            size_t transpIndex = col * stride2 + row;
-
-            if(matrix1[srcIndex] != matrix2[transpIndex])
-            {
-                ++count;
-            }
-        }
-    }
-
-    return count;
-}
-
-int CompareResources2(const size_t dimension, float* matrix1, size_t stride1, double* matrix2, size_t stride2)
-{
-    int count = 0;
-
-    for(size_t row = 0; row < dimension; ++row)
-    {
-        for(size_t col = 0; col < dimension; ++col)
-        {
-            size_t srcIndex = row * stride1 + col;
-            size_t transpIndex = col * stride2 + row;
-
-            if((double)(matrix1[srcIndex]) != matrix2[transpIndex])
-            {
-                ++count;
-            }
-        }
-    }
-
-    return count;
-}
-
-//-------------------------------------------------------------
-
 int main()
 {
-    const size_t dim = 4000;    
+    const size_t dim = 2000;    
     const size_t matrixElementsCount = dim * dim;
 
     float* fp32Matrix = (float*)malloc(matrixElementsCount * sizeof(float));
@@ -125,21 +81,16 @@ int main()
 
     printf("%lu %lu ", slv.expandedDimension, slv.sseBlocksCount);
 
-    {
-        int c1 = CompareResources1(dim, fp32Matrix, dim, slv.fp32Matrix, slv.fp32VectorStride / sizeof(float));
-        int c2 = CompareResources2(dim, fp32Matrix, dim, slv.fp64Matrix, slv.fp64VectorStride / sizeof(double));
-
-        printf("%d %d\n", c1, c2);
-    }
-
     printf("cpus %lu\n", slv.ncpu);
 
     gettimeofday(&before, NULL);
-    for(int i = 0; i < 10; ++i)
+    //for(int i = 0; i < 2; ++i)
     slv.Solve();
     gettimeofday(&after, NULL);
 
     printf("Execution time: %u ms.\n", timeDifference(&before, &after) / 1000);
+
+    printf("%.15e\n", slv.CalcResiduals(slv.solution, slv.residuals));
 
 cleanup:
 
