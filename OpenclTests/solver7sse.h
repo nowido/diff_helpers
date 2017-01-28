@@ -76,6 +76,7 @@ struct Solver : public ThreadPool
     double* fp64MatrixLup;
 
     double* solution;
+    double* iterativeSolution;
     double* residuals;
 
     static const int STOP = 0;
@@ -102,8 +103,6 @@ struct Solver : public ThreadPool
         int pivotIndex;
         size_t c1;
         size_t c2;
-        double* x;
-        double* r;
         // ... and anything
     };
 
@@ -117,6 +116,7 @@ struct Solver : public ThreadPool
         permutations(NULL),
         fp64MatrixLup(NULL),
         solution(NULL),
+        iterativeSolution(NULL),
         residuals(NULL),
         fp32Matrix(NULL),        
         fp64Matrix(NULL),
@@ -141,6 +141,7 @@ struct Solver : public ThreadPool
 
         ThreadPool::Dispose();
 
+        aligned_free(iterativeSolution);
         aligned_free(solution);
         aligned_free(residuals);
 
@@ -171,10 +172,8 @@ struct Solver : public ThreadPool
         fp32VectorSize = dimension * sizeof(float);        
         fp64VectorSize = dimension * sizeof(double);
 
-        extra = dimension % sseBaseCount;
-        
-        expandedDimension = extra ? (dimension + (sseBaseCount - extra)) : dimension;
-        
+        extra = dimension % sseBaseCount;        
+        expandedDimension = dimension + (extra ? (sseBaseCount - extra) : 0);                
         trail = expandedDimension - dimension;
         
         sseBlocksCount = expandedDimension / sseBaseCount;
@@ -192,6 +191,7 @@ struct Solver : public ThreadPool
         fp64Vector = (double*)aligned_alloc(sseAlignment, fp64VectorStride); 
 
         solution = (double*)aligned_alloc(sseAlignment, fp64VectorStride); 
+        iterativeSolution = (double*)aligned_alloc(sseAlignment, fp64VectorStride); 
         residuals = (double*)aligned_alloc(sseAlignment, fp64VectorStride); 
 
         permutations = (int*)malloc(expandedDimension * sizeof(int));
@@ -309,6 +309,7 @@ struct Solver : public ThreadPool
             processMainBlockMt(step);
         }
         
+        //expandMatrix();
         expandMatrixMt();
 
         useLupToSolve(solution, fp64Vector);
@@ -316,9 +317,33 @@ struct Solver : public ThreadPool
         return true;
     }
 
-    double CalcResiduals(double* x, double* r)
+    /////////////////////////////////////////
+    bool Iterate(size_t count)
     {
-        return CalcResidualsMt(x, r);
+        if(!Solve())
+        {
+            return false;
+        }
+
+        for(size_t i = 0; i < count; ++i)
+        {
+            CalcResiduals();
+
+            useLupToSolve(iterativeSolution, residuals);
+
+            for(size_t col = 0; col < dimension; ++col)
+            {
+                solution[col] += iterativeSolution[col];
+            }
+        }
+
+        return true;            
+    }
+
+    /////////////////////////////////////////
+    double CalcResiduals()
+    {
+        return CalcResidualsMt();
     }
 
 protected:
@@ -561,12 +586,12 @@ private:
         size_t c1 = taskItems[index].c1;
         size_t c2 = taskItems[index].c2;
 
-        float* pScan1 = fp32Matrix + c1;
-        float* pScan2 = fp32Matrix + c2;
+        float* pScan1 = fp32Matrix + index * expandedDimension + c1;
+        float* pScan2 = fp32Matrix + index * expandedDimension + c2;
 
         size_t skipSize = expandedDimension * ThreadPool::capacity;
 
-        for(size_t i = 0; i < dimension; i += ThreadPool::capacity, pScan1 += skipSize, pScan2 += skipSize)
+        for(size_t i = index; i < dimension; i += ThreadPool::capacity, pScan1 += skipSize, pScan2 += skipSize)
         {
             float t = *pScan1;
             *pScan1 = *pScan2;
@@ -715,7 +740,7 @@ private:
     */
 
         // single-threaded SSE version
-
+    //*
     void divideRowElements(size_t step)
     {
         size_t offset = step + 1;
@@ -756,7 +781,7 @@ private:
             _mm_store_ps(p, _mm_div_ps(_mm_load_ps(p), divisor));
         }            
     }
-    
+    //*/
     /////////////////////////////////////////
     void chargeKernelProcessMainBlock(size_t step)
     {
@@ -1012,23 +1037,40 @@ private:
         Recharge();        
     }
 
+    void expandMatrix()
+    {
+        float* pfp32 = fp32Matrix;
+        
+        for(size_t row = 0; row < dimension; ++row, pfp32 += expandedDimension)
+        {            
+                // row becomes a column (de-transpose LU matrix)
+            
+            double* pfp64 = fp64MatrixLup + row;
+
+            for(size_t col = 0; col < dimension; ++col, pfp64 += expandedDimension)
+            {
+                *pfp64 = (double)(pfp32[col]);
+            }
+        }        
+    }
+
     /////////////////////////////////////////
     void useLupToSolve(double* x, double* b)
     {        
-        memcpy(x, b, fp32VectorSize);
+        memcpy(x, b, fp64VectorSize);
 
             // permute right-hand part
         
         size_t lastIndex = dimension - 1;
 
-        for(size_t i = 0; i < lastIndex; ++i)
+        for(size_t step = 0; step < lastIndex; ++step)
         {
-            int permutationIndex = permutations[i];
+            int permutationIndex = permutations[step];
             
-            if(permutationIndex != i)
+            if(permutationIndex != step)
             {
-                double v = x[i];
-                x[i] = x[permutationIndex];
+                double v = x[step];
+                x[step] = x[permutationIndex];
                 x[permutationIndex] = v;
             }
         }
@@ -1070,21 +1112,16 @@ private:
     }
 
     /////////////////////////////////////////
-    void chargeKernelCalcResiduals(double* x, double* r)
+    void chargeKernelCalcResiduals()
     {
         for(size_t i = 0; i < ThreadPool::capacity; ++i)
         {
             taskItems[i].code = CALC_RESIDUALS;
-            taskItems[i].x = x;
-            taskItems[i].r = r;
         }
     }
 
     void kernelCalcResiduals(int index)
     {
-        double* x = taskItems[index].x;
-        double* r = taskItems[index].r;
-
         double* pScanRow = fp64Matrix + index * expandedDimension;
 
         size_t skipSize = ThreadPool::capacity * expandedDimension;
@@ -1093,18 +1130,18 @@ private:
         {
             double s = 0;
 
-            for(size_t i = 0; i < dimension; ++i)
+            for(size_t col = 0; col < dimension; ++col)
             {
-                s += pScanRow[i] * x[i];
+                s += pScanRow[col] * solution[col];
             }
 
-            r[row] = fp64Vector[row] - s;
+            residuals[row] = fp64Vector[row] - s;
         }
     }
 
-    double CalcResidualsMt(double* x, double* r)
+    double CalcResidualsMt()
     {
-        chargeKernelCalcResiduals(x, r);        
+        chargeKernelCalcResiduals();        
         
         WaitResults();
 
@@ -1114,7 +1151,7 @@ private:
 
         for(size_t i = 0; i < dimension; ++i)
         {
-            double e = r[i];
+            double e = residuals[i];
 
             s += e * e;
         }
