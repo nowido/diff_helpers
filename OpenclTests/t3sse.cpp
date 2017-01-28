@@ -54,7 +54,7 @@ void fillTestSystem(const size_t dimension, float* knownX, float* matrix, float*
 
 int main()
 {
-    const size_t dim = 2000;    
+    const size_t dim = 4000;    
     const size_t matrixElementsCount = dim * dim;
 
     float* fp32Matrix = (float*)malloc(matrixElementsCount * sizeof(float));
@@ -85,12 +85,13 @@ int main()
 
     gettimeofday(&before, NULL);
     //for(int i = 0; i < 2; ++i)
-    slv.Solve();
+    //slv.Solve();
+    slv.Iterate(3);
     gettimeofday(&after, NULL);
 
     printf("Execution time: %u ms.\n", timeDifference(&before, &after) / 1000);
 
-    printf("%.15e\n", slv.CalcResiduals(slv.solution, slv.residuals));
+    printf("%.15e\n", slv.CalcResiduals());
 
 cleanup:
 
