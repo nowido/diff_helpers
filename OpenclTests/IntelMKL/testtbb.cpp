@@ -178,8 +178,14 @@ int main()
 
     gettimeofday(&before, NULL);
     for(size_t i = 0; i < 10; ++i)
-    parallel_for(blocked_range<size_t>(0, dim), FillRandom(buffer, 1000));    
-    //frtp.FillRandom(buffer, 1000, dim);
+    //parallel_for(blocked_range<size_t>(0, dim), FillRandom(buffer, 1000));    
+    /*
+    parallel_for(size_t(0), dim, [=](size_t i)
+    {
+        buffer[i] = getRandom(1000);
+    });
+    */
+    frtp.FillRandom(buffer, 1000, dim);
     gettimeofday(&after, NULL);
 
     printf("Execution time: %u ms.\n", timeDifference(&before, &after) / 1000);
