@@ -9,6 +9,8 @@
 
 #include <windows.h>
 
+#define thread_sleep Sleep
+
 typedef HANDLE thread_handle;
 
 typedef DWORD thread_ret;
@@ -72,9 +74,24 @@ int thread_mutex_unlock(thread_mutex* mut)
 
 #else // POSIX stuff
 
+#include <time.h>
 #include <sys/types.h>
 #include <sys/sysctl.h>
 #include <pthread.h>
+
+void thread_sleep(size_t ms);
+
+void thread_sleep(size_t ms)
+{
+    size_t seconds = ms / 1000;
+
+    struct timespec tim, tim2;
+
+    tim.tv_sec = seconds;
+    tim.tv_nsec = (ms - seconds * 1000) * 1000000;    
+
+    nanosleep(&tim , &tim2);
+}
 
 typedef pthread_t thread_handle;
 
@@ -134,6 +151,7 @@ struct ThreadArgsQDAIEOPJKL
 {
     ThreadPool* pool;
     int index;
+    bool ready;
 };
 
 thread_ret GlobalThreadProcQDAIEOPJKL(thread_arg arg);
@@ -206,10 +224,20 @@ struct ThreadPool
         {
             array_run_args[i].pool = this;
             array_run_args[i].index = i;
+            array_run_args[i].ready = false;
 
             create_thread(GlobalThreadProcQDAIEOPJKL, (thread_arg)&(array_run_args[i]));
         }
-
+            // ensure threads are created and blocked on e1, e1s to this moment
+        for(size_t i = 0; i < capacity; ++i)
+        {
+            while(!array_run_args[i].ready)
+            {                    
+                thread_sleep(10);
+            }
+        }
+            // ... yet, we can't be sure for 100%; OK.
+        
             // unlock mutexes, let blocked threads run
         for(size_t i = 0; i < capacity; ++i)    
         {            
@@ -348,6 +376,8 @@ protected:
 thread_ret GlobalThreadProcQDAIEOPJKL(thread_arg arg)
 {
     ThreadArgsQDAIEOPJKL* pArg = (ThreadArgsQDAIEOPJKL*)arg;
+
+    pArg->ready = true;
 
     (pArg->pool)->ThreadProc(pArg->index);
 
