@@ -1,2 +1,2 @@
 #!/bin/sh
-g++ -otesttbb -I${TBBROOT}/include testtbb.cpp -L${TBBROOT}/lib -ltbb
+g++ -std=c++11 -otesttbb -I${TBBROOT}/include testtbb.cpp -L${TBBROOT}/lib -ltbb
