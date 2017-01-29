@@ -159,7 +159,7 @@ struct Solver : public ThreadPool
     /////////////////////////////////////////
     bool Init(size_t useDimension)
     {
-        ncpu = get_ncpu();                                                  
+        ncpu = get_ncpu();                                                          
         lastProcessorIndex = ncpu - 1;
 
         if(!ThreadPool::Init(ncpu))
@@ -278,8 +278,8 @@ struct Solver : public ThreadPool
         for(size_t step = 0; step < dimension; ++step)        
         {            
             //int pivotIndex = sseFindPivot(step);
-            //int pivotIndex = findPivot(step);
-            int pivotIndex = findPivotMt(step);
+            int pivotIndex = findPivot(step);
+            //int pivotIndex = findPivotMt(step);
             /*
             float pv = fp32Matrix[step * expandedDimension + pivotIndex];
             float pv2 = fp32Matrix[step * expandedDimension + pivotIndex2];
@@ -298,19 +298,19 @@ struct Solver : public ThreadPool
 
             if(pivotIndex != step)
             {
-                //swapColumns(step, pivotIndex);
-                swapColumnsMt(step, pivotIndex);
+                swapColumns(step, pivotIndex);
+                //swapColumnsMt(step, pivotIndex);
             }
             
-            //divideRowElements(step);
-            divideRowElementsMt(step);
+            divideRowElements(step);
+            //divideRowElementsMt(step);
 
             //processMainBlock(step);            
             processMainBlockMt(step);
         }
         
-        //expandMatrix();
-        expandMatrixMt();
+        expandMatrix();
+        //expandMatrixMt();
 
         useLupToSolve(solution, fp64Vector);
 
