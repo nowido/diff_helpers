@@ -869,8 +869,8 @@ private:
             {
                 // [col] is block aligned
 
-                float *p = pScanRow + col;
-                   
+                float *p = pScanRow + col;   
+
                 _mm_store_ps(p, _mm_sub_ps(_mm_load_ps(p), _mm_mul_ps(ldCol, _mm_load_ps(pLdRow + col))));
             }            
         }
