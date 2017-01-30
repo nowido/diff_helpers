@@ -83,7 +83,7 @@ public:
         mem_amplitude(amplitude)
     {}
 
-    /*
+    //*
     void operator()(const blocked_range<size_t>& r) const
     {
         align_as(16) float buf[4]; 
@@ -104,8 +104,8 @@ public:
             _mm_store_ps(p + i * blockSize, *pBuf);
         }
     }
-    */
-    //*
+    //*/
+    /*
     void operator()(const blocked_range<size_t>& r) const
     {
         float* p = mem_buffer;
@@ -116,7 +116,7 @@ public:
             p[i] = getRandom(a);
         }
     } 
-    //*/   
+    */   
 };
 
 //-------------------------------------------------------------
