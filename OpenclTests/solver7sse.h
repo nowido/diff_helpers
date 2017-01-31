@@ -1,6 +1,10 @@
 #ifndef SOLVERSSE_H
 #define SOLVERSSE_H
 
+#include <tbb/tbb.h>
+
+using namespace tbb;
+
 //-------------------------------------------------------------
 // aligned memory allocation cross-stuff
 
@@ -13,6 +17,8 @@
 #define aligned_alloc(alignment, size) _aligned_malloc((size), (alignment))
 #define aligned_free _aligned_free
 #define align_as(alignment) __declspec(align(alignment))
+
+#include "threadpool_w.h"
 
 #else
 
@@ -28,13 +34,13 @@ void* aligned_alloc(size_t alignment, size_t size)
 #define aligned_free free
 #define align_as(alignment) __attribute__((aligned((alignment))))
 
+#include "threadpool.h"
+
 #endif
 
 //-------------------------------------------------------------
 
 #include <xmmintrin.h>
-
-#include "threadpool.h"
 
 //-------------------------------------------------------------
 
@@ -877,6 +883,7 @@ private:
     }    
     //*/
 
+    /*
     void processMainBlockMt(size_t step)
     {
         size_t workSize = dimension - step;
@@ -895,7 +902,82 @@ private:
             Recharge();
         }        
     }
+    */
 
+    //*
+    void processMainBlockMt(size_t step)
+    {
+        class Apply
+        {
+            size_t step;
+            size_t dimension;
+            size_t expandedDimension;
+            float *const fp32Matrix;
+
+        public:
+
+            Apply(size_t argStep, size_t argDimension, size_t argExpandedDimension, float* argFp32Matrix) :                 
+                step(argStep),
+                dimension(argDimension),
+                expandedDimension(argExpandedDimension),
+                fp32Matrix(argFp32Matrix)
+            {}
+
+            void operator()(const blocked_range<size_t>& r) const
+            {
+                float* pLdRow = fp32Matrix + step * expandedDimension;
+                
+                size_t offset = step + 1;
+
+                    // tmp buffer to manipulate sse blocks
+
+                align_as(16) float bufLdCol[4]; 
+                
+                    // find nearest block-aligned index
+
+                size_t blockAlignedIndex = offset / 4;        
+                blockAlignedIndex *= 4;
+
+                size_t runStart = blockAlignedIndex + ((offset > blockAlignedIndex) ? 4 : 0);
+                
+                for(size_t i = r.begin(); i != r.end(); ++i)
+                {
+                    float* pScanRow = fp32Matrix + i * expandedDimension;
+                    
+                        // load 1 (may be, unaligned) element
+
+                    bufLdCol[0] = pScanRow[step];
+
+                        // move to aligned run start
+
+                    size_t col = offset;
+
+                    for(; col < runStart; ++col)
+                    {
+                        pScanRow[col] -= bufLdCol[0] * pLdRow[col];
+                    }
+
+                        // copy element into all 4 words
+
+                    __m128 ldCol = _mm_load1_ps(bufLdCol);
+
+                        // do main run
+
+                    for(; col < dimension; col += 4)
+                    {
+                        // [col] is block aligned
+
+                        float *p = pScanRow + col;   
+
+                        _mm_store_ps(p, _mm_sub_ps(_mm_load_ps(p), _mm_mul_ps(ldCol, _mm_load_ps(pLdRow + col))));
+                    }            
+                }
+            } 
+        };
+
+        parallel_for(blocked_range<size_t>(step + 1, dimension), Apply(step, dimension, expandedDimension, fp32Matrix));
+    }
+    //*/
     void processMainBlock(size_t step)
     {        
         float* pLdRow = fp32Matrix + step * expandedDimension;
