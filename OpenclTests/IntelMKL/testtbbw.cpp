@@ -83,7 +83,7 @@ public:
         mem_amplitude(amplitude)
     {}
 
-    //*
+    /*
     void operator()(const blocked_range<size_t>& r) const
     {
         align_as(16) float buf[4]; 
@@ -104,8 +104,8 @@ public:
             _mm_store_ps(p + i * blockSize, *pBuf);
         }
     }
-    //*/
-    /*
+    */
+    //*
     void operator()(const blocked_range<size_t>& r) const
     {
         float* p = mem_buffer;
@@ -116,7 +116,7 @@ public:
             p[i] = getRandom(a);
         }
     } 
-    */   
+    //*/   
 };
 
 //-------------------------------------------------------------
@@ -128,6 +128,8 @@ struct FillRandomTp : public ThreadPool
         int code;                
         float* buffer;
         float amplitude;
+
+        size_t offset;
         size_t count;
     };
 
@@ -142,7 +144,7 @@ struct FillRandomTp : public ThreadPool
 
     bool Init()
     {
-        if(!ThreadPool::Init(get_ncpu()))
+        if(!ThreadPool::Init(get_ncpu()))        
         {
             return false;
         }        
@@ -199,37 +201,63 @@ private:
 
     void chargeFillRandom(float* buffer, float amplitude, size_t count)
     {
+        size_t blockSize = count / ThreadPool::capacity;
+
+        size_t totalWorkSize = blockSize * ThreadPool::capacity;
+        
         for(size_t i = 0; i < ThreadPool::capacity; ++i)
         {
             taskItems[i].code = FILL_RANDOM;
             taskItems[i].buffer = buffer;            
             taskItems[i].amplitude = amplitude;            
-            taskItems[i].count = count;            
+            
+            taskItems[i].offset = blockSize * i;
+            taskItems[i].count = blockSize + ((i == ThreadPool::capacity - 1) ? (count - totalWorkSize) : 0);
         }        
     }        
 
+    /*
     void kernelFillRandom(int index)
     {
-        align_as(16) float buf[4]; 
-        __m128* pBuf = (__m128*)buf;
-        
         float* buffer = taskItems[index].buffer;
         float amplitude = taskItems[index].amplitude;
+
+        size_t offset = taskItems[index].offset;
         size_t count = taskItems[index].count;
 
-        size_t blockSize = 4;
-        size_t skipSize = blockSize * ThreadPool::capacity;
+        const size_t blockSize = 4;
 
-        for(size_t i = index * blockSize; i < count; i += skipSize)
+        align_as(16) float buf[4]; 
+        __m128* pBuf = (__m128*)buf;
+
+        for(size_t i = offset; i < count; i += blockSize)
         {
             buf[0] = getRandom(amplitude);
             buf[1] = getRandom(amplitude);
             buf[2] = getRandom(amplitude);
             buf[3] = getRandom(amplitude);
 
-            _mm_store_ps(buffer + i, *pBuf);
-        }
+            _mm_store_ps(buffer + offset, *pBuf);
+        }        
     }
+    */
+    //*
+    void kernelFillRandom(int index)
+    {
+        float* buffer = taskItems[index].buffer;
+        float amplitude = taskItems[index].amplitude;
+
+        size_t offset = taskItems[index].offset;
+        size_t count = taskItems[index].count;
+
+        size_t stop = offset + count;
+
+        for(size_t i = offset; i < stop; ++i)
+        {
+            buffer[i] = getRandom(amplitude);
+        }        
+    }
+    //*/    
 };
 
 //-------------------------------------------------------------
@@ -256,14 +284,14 @@ int main()
     GetSystemTimeAsFileTime(&before);
     for(size_t i = 0; i < 10; ++i)
     //parallel_for(blocked_range<size_t>(0, dim/4), FillRandom(buffer, 1000));         
-    //parallel_for(blocked_range<size_t>(0, dim), FillRandom(buffer, 1000));         
+    parallel_for(blocked_range<size_t>(0, dim), FillRandom(buffer, 1000));         
     /*
     parallel_for(size_t(0), dim, [=](size_t i)
     {
         buffer[i] = getRandom(1000);
     });
     */
-    frtp.FillRandom(buffer, 1000, dim);
+    //frtp.FillRandom(buffer, 1000, dim);
     GetSystemTimeAsFileTime(&after);
 
     printf("Execution time: %u ms.\n", timeDifference(&before, &after) / 1000);
