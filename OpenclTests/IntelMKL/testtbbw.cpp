@@ -7,7 +7,10 @@
 
 #include <tbb/tbb.h>
 
-#include "../threadpool.h"
+//#include "../threadpool.h"
+//#include "../threadpool_w.h"
+#include "../threadpool_we.h"
+//#include "../threadpool_ws.h"
 
 //-------------------------------------------------------------
 // aligned memory allocation cross-stuff
@@ -143,7 +146,7 @@ struct FillRandomTp : public ThreadPool
     {}
 
     bool Init()
-    {
+    {        
         if(!ThreadPool::Init(get_ncpu()))        
         {
             return false;
@@ -282,16 +285,16 @@ int main()
     srand(before.dwLowDateTime);
 
     GetSystemTimeAsFileTime(&before);
-    for(size_t i = 0; i < 10; ++i)
+    for(size_t i = 0; i < 20; ++i)
     //parallel_for(blocked_range<size_t>(0, dim/4), FillRandom(buffer, 1000));         
-    parallel_for(blocked_range<size_t>(0, dim), FillRandom(buffer, 1000));         
+    //parallel_for(blocked_range<size_t>(0, dim), FillRandom(buffer, 1000));         
     /*
     parallel_for(size_t(0), dim, [=](size_t i)
     {
         buffer[i] = getRandom(1000);
     });
     */
-    //frtp.FillRandom(buffer, 1000, dim);
+    frtp.FillRandom(buffer, 1000, dim);
     GetSystemTimeAsFileTime(&after);
 
     printf("Execution time: %u ms.\n", timeDifference(&before, &after) / 1000);
