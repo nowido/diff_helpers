@@ -62,12 +62,12 @@ int thread_mutex_destroy(thread_mutex* mut)
     return CloseHandle(*mut) ? 0 : 1;
 }
 
-int thread_mutex_lock(thread_mutex* mut)
+inline int thread_mutex_lock(thread_mutex* mut)
 {
     return WaitForSingleObject(*mut, INFINITE);
 }
 
-int thread_mutex_unlock(thread_mutex* mut)
+inline int thread_mutex_unlock(thread_mutex* mut)
 {
     return ReleaseMutex(*mut) ? 0 : 1;
 }
