@@ -8,7 +8,7 @@
 
 #include <tbb/tbb.h>
 
-#include "../threadpool.h"
+#include "../threadpool_p.h"
 
 using namespace tbb;
 
@@ -57,43 +57,20 @@ public:
 
 struct FillRandomTp : public ThreadPool
 {   
-    struct TaskItem
-    {
-        int code;                
-        float* buffer;
-        float amplitude;
-        size_t count;
-    };
-
-    TaskItem* taskItems;
-
-    static const int STOP = 0;
-    static const int FILL_RANDOM = 1;
-
-    FillRandomTp() : 
-        taskItems(NULL)
-    {}
+    float* memBuffer;
+    float memAmplitude;        
 
     bool Init()
     {
-        if(!ThreadPool::Init(get_ncpu()))
-        {
-            return false;
-        }        
-
-        taskItems = (TaskItem*)malloc(ThreadPool::capacity * sizeof(TaskItem));
-
-        return true;
+        return ThreadPool::Init(get_ncpu());
     }
 
     void Dispose()
     {
-        chargeStop();
+        ThreadPool::stop = true;
         WaitResults();
 
         ThreadPool::Dispose();    
-
-        free(taskItems);
     }
 
     void FillRandom(float* buffer, float amplitude, size_t count)
@@ -103,56 +80,40 @@ struct FillRandomTp : public ThreadPool
         Recharge();
     }
 
-protected:
-
-    virtual bool ProcessTask(int index)
-    {
-        int code = taskItems[index].code;
-
-        if(code == STOP)
-        {
-            return false;
-        }
-        else //if(code == FILL_RANDOM)
-        {
-            kernelFillRandom(index);
-        }
-
-        return true;
-    }
-
 private:
 
-    void chargeStop()
+    virtual void ProcessTask(/*int index,*/ std::pair<size_t, size_t>& item)
     {
-        for(size_t i = 0; i < ThreadPool::capacity; ++i)
+        float* buffer = memBuffer;
+        float amplitude = memAmplitude;
+
+        for(size_t i = item.first; i < item.second; ++i)
         {
-            taskItems[i].code = STOP;            
+            buffer[i] = getRandom(amplitude);
         }        
-    }    
+    }
 
     void chargeFillRandom(float* buffer, float amplitude, size_t count)
     {
-        for(size_t i = 0; i < ThreadPool::capacity; ++i)
-        {
-            taskItems[i].code = FILL_RANDOM;
-            taskItems[i].buffer = buffer;            
-            taskItems[i].amplitude = amplitude;            
-            taskItems[i].count = count;            
-        }        
-    }        
+        const size_t grainsCountPerProcessor = 128;
 
-    void kernelFillRandom(int index)
-    {
-        float* buffer = taskItems[index].buffer;
-        float amplitude = taskItems[index].amplitude;
-        size_t count = taskItems[index].count;
+        size_t grainsCount = ThreadPool::capacity * grainsCountPerProcessor;
 
-        for(size_t i = index; i < count; i += ThreadPool::capacity)
-        {
-            buffer[i] = getRandom(amplitude);
+        size_t blockSize = count / grainsCount;
+
+        size_t acc = 0;
+        size_t next = acc + blockSize;
+
+        for(size_t i = 0; i < grainsCount - 1; ++i, acc = next, next += blockSize)
+        {            
+            ThreadPool::items.push(std::pair<size_t, size_t>(acc, next));            
         }
-    }
+
+        ThreadPool::items.push(std::pair<size_t, size_t>(acc, count));
+        
+        memBuffer = buffer;
+        memAmplitude = amplitude;
+    }        
 };
 
 //-------------------------------------------------------------
@@ -177,15 +138,21 @@ int main()
     srand(before.tv_usec);
 
     gettimeofday(&before, NULL);
-    for(size_t i = 0; i < 10; ++i)
-    //parallel_for(blocked_range<size_t>(0, dim), FillRandom(buffer, 1000));    
-    /*
-    parallel_for(size_t(0), dim, [=](size_t i)
+    for(size_t i = 0; i < 20; ++i)
     {
-        buffer[i] = getRandom(1000);
-    });
-    */
-    frtp.FillRandom(buffer, 1000, dim);
+        //static affinity_partitioner ap;
+        //parallel_for(blocked_range<size_t>(0, dim), FillRandom(buffer, 1000), ap);    
+
+        //parallel_for(blocked_range<size_t>(0, dim, 100000), FillRandom(buffer, 1000), simple_partitioner());    
+        //parallel_for(blocked_range<size_t>(0, dim), FillRandom(buffer, 1000));    
+        /*
+        parallel_for(size_t(0), dim, [=](size_t i)
+        {
+            buffer[i] = getRandom(1000);
+        });
+        */
+        frtp.FillRandom(buffer, 1000, dim);
+    }
     gettimeofday(&after, NULL);
 
     printf("Execution time: %u ms.\n", timeDifference(&before, &after) / 1000);
