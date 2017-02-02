@@ -9,8 +9,9 @@
 
 //#include "../threadpool.h"
 //#include "../threadpool_w.h"
-#include "../threadpool_we.h"
-//#include "../threadpool_ws.h"
+//#include "../threadpool_we.h"
+//#include "../threadpool_pw.h"
+#include "../threadpool_p.h"
 
 //-------------------------------------------------------------
 // aligned memory allocation cross-stuff
@@ -123,6 +124,8 @@ public:
 };
 
 //-------------------------------------------------------------
+
+#if 0
 
 struct FillRandomTp : public ThreadPool
 {   
@@ -261,6 +264,69 @@ private:
         }        
     }
     //*/    
+};
+
+#endif
+
+struct FillRandomTp : public ThreadPool
+{   
+    float* memBuffer;
+    float memAmplitude;        
+
+    bool Init()
+    {
+        return ThreadPool::Init(get_ncpu());
+    }
+
+    void Dispose()
+    {
+        ThreadPool::stop = true;
+        WaitResults();
+
+        ThreadPool::Dispose();    
+    }
+
+    void FillRandom(float* buffer, float amplitude, size_t count)
+    {
+        chargeFillRandom(buffer, amplitude, count);
+        WaitResults();
+        Recharge();
+    }
+
+private:
+
+    virtual void ProcessTask(/*int index,*/ std::pair<size_t, size_t>& item)
+    {
+        float* buffer = memBuffer;
+        float amplitude = memAmplitude;
+
+        for(size_t i = item.first; i < item.second; ++i)
+        {
+            buffer[i] = getRandom(amplitude);
+        }        
+    }
+
+    void chargeFillRandom(float* buffer, float amplitude, size_t count)
+    {
+        const size_t grainsCountPerProcessor = 256;
+
+        size_t grainsCount = ThreadPool::capacity * grainsCountPerProcessor;
+
+        size_t blockSize = count / grainsCount;
+
+        size_t acc = 0;
+        size_t next = acc + blockSize;
+
+        for(size_t i = 0; i < grainsCount - 1; ++i, acc = next, next += blockSize)
+        {            
+            ThreadPool::items.push(std::pair<size_t, size_t>(acc, next));            
+        }
+
+        ThreadPool::items.push(std::pair<size_t, size_t>(acc, count));
+        
+        memBuffer = buffer;
+        memAmplitude = amplitude;
+    }        
 };
 
 //-------------------------------------------------------------
