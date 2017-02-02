@@ -208,7 +208,10 @@ int thread_mutex_init(thread_mutex* mut)
 
 inline void acquire_lock(bool* lock) 
 {
-    while (!__sync_bool_compare_and_swap(lock, false, true));
+    while (!__sync_bool_compare_and_swap(lock, false, true))
+    {
+        asm("PAUSE"); 
+    }
 }
 
 inline void release_lock(bool* lock) 
