@@ -50,6 +50,15 @@ typedef void* thread_arg;
 
 typedef HANDLE thread_mutex;
 
+/*
+typedef union
+{    
+    align_as(64) HANDLE mutex;
+    char padding[64 - sizeof(HANDLE)];
+}
+thread_mutex;
+*/
+
 typedef thread_ret (*pthread_routine)(thread_arg);
 
 size_t get_ncpu();
@@ -90,26 +99,30 @@ int thread_join(thread_handle thread, thread_ret* pStatus)
 int thread_mutex_init(thread_mutex* mut)
 {
     return (*mut = CreateMutex(NULL, FALSE, NULL)) ? 0 : 1;
+    //return (mut->mutex = CreateMutex(NULL, FALSE, NULL)) ? 0 : 1;
 }
 
 int thread_mutex_destroy(thread_mutex* mut)
 {
     return CloseHandle(*mut) ? 0 : 1;
+    //return CloseHandle(mut->mutex) ? 0 : 1;
 }
 
 inline int thread_mutex_lock(thread_mutex* mut)
 {
     return WaitForSingleObject(*mut, INFINITE);
+    //return WaitForSingleObject(mut->mutex, INFINITE);
 }
 
 inline int thread_mutex_unlock(thread_mutex* mut)
 {
     return ReleaseMutex(*mut) ? 0 : 1;
+    //return ReleaseMutex(mut->mutex) ? 0 : 1;
 }
 
 inline void acquire_lock(bool* lock) 
 {    
-    while (InterlockedCompareExchange((volatile unsigned long*)lock, true, false));
+    while (InterlockedCompareExchange((unsigned long volatile*)lock, true, false));
 }
 
 inline void release_lock(bool* lock) 
@@ -240,7 +253,7 @@ struct ThreadPool
     bool lock;
 
     bool stop;
-
+    
     std::queue< std::pair<size_t, size_t> > items;
 
     /////////////////////////////////////////
