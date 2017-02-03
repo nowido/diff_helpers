@@ -41,8 +41,6 @@ void* aligned_alloc(size_t alignment, size_t size)
 
 #define thread_sleep Sleep
 
-#define thread_yield_processor YieldProcessor
-
 typedef HANDLE thread_handle;
 
 typedef DWORD thread_ret;
@@ -73,6 +71,8 @@ int thread_mutex_unlock(thread_mutex* mut);
 
 void acquire_lock(bool* lock);
 void release_lock(bool* lock);
+
+void thread_yield_processor();
 
 size_t get_ncpu()
 {
@@ -120,14 +120,28 @@ inline int thread_mutex_unlock(thread_mutex* mut)
     //return ReleaseMutex(mut->mutex) ? 0 : 1;
 }
 
-inline void acquire_lock(bool* lock) 
+//inline void acquire_lock(bool* lock) 
+inline void acquire_lock(PSRWLOCK lock) 
 {    
-    while (InterlockedCompareExchange((unsigned long volatile*)lock, true, false));
+    /*
+    while(InterlockedCompareExchange((volatile LONG*)lock, true, false))
+    {
+        _mm_pause();
+    }
+    */
+    AcquireSRWLockExclusive(lock);    
 }
 
-inline void release_lock(bool* lock) 
+//inline void release_lock(bool* lock) 
+inline void release_lock(PSRWLOCK lock) 
 {
-    *lock = false;
+    //*lock = false;
+    ReleaseSRWLockExclusive(lock);
+}
+
+inline void thread_yield_processor()
+{
+    _mm_pause();
 }
 
 #else // POSIX stuff
@@ -252,8 +266,17 @@ struct ThreadPool
     thread_mutex* array_e2;
 
     ThreadArgsQDAIEOPJKL* array_run_args;
-    
+
+#ifdef _WIN32
+
+    SRWLOCK lock;
+    //align_as(16) bool lock;
+
+#else
+
     bool lock;
+
+#endif 
 
     bool stop;
     
@@ -265,8 +288,7 @@ struct ThreadPool
         array_e1(NULL),
         array_e1s(NULL),
         array_e2(NULL),
-        array_run_args(NULL),
-        lock(false),
+        array_run_args(NULL),        
         stop(false)
     {}
 
@@ -339,6 +361,12 @@ struct ThreadPool
             thread_mutex_unlock(array_e1s + i);
         }
 
+#ifdef _WIN32
+        InitializeSRWLock(&lock);
+        //lock = false;
+#else
+        lock = false;        
+#endif
         return true;
     }
 
@@ -390,7 +418,7 @@ struct ThreadPool
 
                 return;                
             }
-
+            
             do
             {
                 acquire_lock(&lock);                  
