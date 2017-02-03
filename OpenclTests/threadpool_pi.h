@@ -122,7 +122,10 @@ inline int thread_mutex_unlock(thread_mutex* mut)
 
 inline void acquire_lock(bool* lock) 
 {    
-    while (InterlockedCompareExchange((unsigned long volatile*)lock, true, false));
+    while (InterlockedCompareExchange((unsigned long volatile*)lock, true, false))
+    {
+        _mm_pause();
+    }
 }
 
 inline void release_lock(bool* lock) 
@@ -250,7 +253,7 @@ struct ThreadPool
 
     ThreadArgsQDAIEOPJKL* array_run_args;
     
-    bool lock;
+    align_as(16) bool lock;
 
     bool stop;
     
