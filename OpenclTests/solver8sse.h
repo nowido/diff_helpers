@@ -88,7 +88,7 @@ struct Solver : public ThreadPool
     union TaskItem
     {
         align_as(64) size_t step;
-        char padding[64];
+        char padding[64 - step];
     };
 
     TaskItem* taskItems;
@@ -511,7 +511,31 @@ private:
         {            
             taskItems[i].step = step;            
         }
+        
+            // make vertical partitioning of [offset, dimension);
+            // each processor gets G * 4 rows of data to operate on
 
+        size_t offset = step + 1;
+
+        const size_t granularity = 8;
+        const size_t granuledSkip = sseBaseCount * granularity;
+
+        size_t acc = offset;
+        size_t next = offset + granuledSkip;
+            
+        for(; next < dimension; acc += granuledSkip, next += granuledSkip)
+        {
+            ThreadPool::items.push(std::pair<size_t, size_t>(acc, next));
+        }
+
+        if(next > dimension)
+        {
+            ThreadPool::items.push(std::pair<size_t, size_t>(acc, dimension));
+        }
+    }
+
+    inline void kernelProcessMainBlock(size_t step, std::pair<size_t, size_t>& workItem)
+    {
         size_t offset = step + 1;
 
         size_t blockAlignedIndex = offset / sseBaseCount;  
@@ -519,25 +543,7 @@ private:
 
         size_t runStart = blockAlignedIndex + ((offset > blockAlignedIndex) ? sseBaseCount : 0);
         
-        size_t vertBlocksCount = (dimension - offset) / sseBaseCount;
-
-        size_t acc = offset;
-        size_t next = offset + sseBaseCount;
-
-        for(size_t i = 0; i < vertBlocksCount; ++i, acc += sseBaseCount, next += sseBaseCount)
-        {
-            ThreadPool::items.push(std::pair<size_t, size_t>(acc, next));
-        }
-
-        if(next < dimension)
-        {
-            ThreadPool::items.push(std::pair<size_t, size_t>(next, dimension));
-        }
-    }
-
-    inline void kernelProcessMainBlock(size_t step, std::pair<size_t, size_t>& workItem)
-    {
-        
+        // take rows from workItem, combine by 4 rows into 1 sse block
     }
 
         // SSE version
