@@ -211,7 +211,10 @@ int thread_mutex_init(thread_mutex* mut)
 
 inline void acquire_lock(bool* lock) 
 {
-    while (!__sync_bool_compare_and_swap(lock, false, true));
+    while (!__sync_bool_compare_and_swap(lock, false, true))
+    {
+        asm("PAUSE"); 
+    }
 }
 
 inline void release_lock(bool* lock) 
@@ -323,11 +326,13 @@ struct ThreadPool
         for(size_t i = 0; i < capacity; ++i)
         {
             while(!array_run_args[i].ready)
-            {                                    
+            {        
+                //thread_sleep(5);                            
                 thread_yield_processor();            
             }
         }
         
+        //thread_sleep(5);
         thread_yield_processor();            
 
             // ... yet, we can't be sure for 100%; OK.
@@ -396,10 +401,10 @@ struct ThreadPool
                 acquire_lock(&lock);                  
                 
                 if(!items.empty())
-                {
-                    std::pair<size_t, size_t> item = items.front();                        
+                {                    
+                    std::pair<size_t, size_t> item = items.front();                                            
                     items.pop();                    
-                    release_lock(&lock);
+                    release_lock(&lock);                 
                     ProcessTask(index, item);
                 }
                 else
