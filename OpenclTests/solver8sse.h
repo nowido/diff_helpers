@@ -659,68 +659,8 @@ private:
             pScanRow += expandedDimension;
         }
     }
-
-        // SSE version
-    /*    
-    void kernelProcessMainBlock(int index)
-    {                
-        size_t step = taskItems[index].step;
-
-        size_t offset = step + 1;
-
-        float* pLdRow = fp32Matrix + step * expandedDimension;
-
-        float* pScanRow = pLdRow + expandedDimension * (index + 1);
-        
-        size_t skipSize = expandedDimension * ThreadPool::capacity;
-
-            // find nearest block-aligned index
-
-        size_t blockAlignedIndex = offset / sseBaseCount;        
-        blockAlignedIndex *= sseBaseCount;
-
-        size_t runStart = blockAlignedIndex + ((offset > blockAlignedIndex) ? sseBaseCount : 0);
-
-            // tmp buffer to manipulate sse blocks
-
-        align_as(16) float bufLdCol[4]; 
-
-            //
-
-        for(size_t row = offset + index; row < dimension; row += ThreadPool::capacity, pScanRow += skipSize)
-        {
-                // load 1 (may be, unaligned) element
-
-            bufLdCol[0] = pScanRow[step];
-
-                // move to aligned run start
-
-            size_t col = offset;
-
-            for(; col < runStart; ++col)
-            {
-                pScanRow[col] -= bufLdCol[0] * pLdRow[col];
-            }
-
-                // copy element into all 4 words
-
-            __m128 ldCol = _mm_load1_ps(bufLdCol);
-
-                // do main run
-
-            for(; col < dimension; col += sseBaseCount)
-            {
-                // [col] is block aligned
-
-                float *p = pScanRow + col;   
-
-                _mm_store_ps(p, _mm_sub_ps(_mm_load_ps(p), _mm_mul_ps(ldCol, _mm_load_ps(pLdRow + col))));
-            }            
-        }
-    }    
-    */
-
-    //*
+    
+    /*
     void processMainBlockMt(size_t step)
     {
         size_t workSize = dimension - step;
@@ -738,8 +678,8 @@ private:
             processMainBlock(step);
         }        
     }
-    //*/
-    /*
+    */
+    //*
     void processMainBlockMt(size_t step)
     {
         class Apply
@@ -760,109 +700,86 @@ private:
 
             void operator()(const blocked_range<size_t>& workItem) const
             {
-                size_t offset = step + 1;
-                
-                size_t blockAlignedIndex = offset / sseBaseCount;  
-                blockAlignedIndex *= sseBaseCount;
-
-                size_t runStart = blockAlignedIndex + ((offset > blockAlignedIndex) ? sseBaseCount : 0);
-                
-                float* pLdRow = fp32Matrix + step * expandedDimension;
-
                 size_t vertScanStart = workItem.begin();
                 size_t vertScanStop = workItem.end();
 
-                float* pScanRow = fp32Matrix + vertScanStart * expandedDimension;
-                
-                for(size_t row = vertScanStart; row < vertScanStop; ++row, pScanRow += expandedDimension)
-                {
-                    float leadColElement = pScanRow[step];
-
-                    for(size_t col = offset; col < dimension; ++col)
-                    {
-                        pScanRow[col] -= leadColElement * pLdRow[col];
-                    }
-                }                
-            } 
-        };
-
-        parallel_for(blocked_range<size_t>(step + 1, dimension), Apply(step, dimension, expandedDimension, fp32Matrix));
-    }
-    */
-    /*
-    void processMainBlockMt(size_t step)
-    {
-        class Apply
-        {
-            size_t step;
-            size_t dimension;
-            size_t expandedDimension;
-            float *const fp32Matrix;
-
-        public:
-
-            Apply(size_t argStep, size_t argDimension, size_t argExpandedDimension, float* argFp32Matrix) :                 
-                step(argStep),
-                dimension(argDimension),
-                expandedDimension(argExpandedDimension),
-                fp32Matrix(argFp32Matrix)
-            {}
-
-            void operator()(const blocked_range<size_t>& r) const
-            {
                 float* pLdRow = fp32Matrix + step * expandedDimension;
-                
+
+                float* pScanRow = fp32Matrix + vertScanStart * expandedDimension;
+
                 size_t offset = step + 1;
 
-                    // tmp buffer to manipulate sse blocks
-
-                align_as(16) float bufLdCol[4]; 
-                
-                    // find nearest block-aligned index
-
-                size_t blockAlignedIndex = offset / 4;        
-                blockAlignedIndex *= 4;
-
-                size_t runStart = blockAlignedIndex + ((offset > blockAlignedIndex) ? 4 : 0);
-                
-                for(size_t i = r.begin(); i != r.end(); ++i)
+                for(size_t row = vertScanStart; row < vertScanStop; ++row)
                 {
-                    float* pScanRow = fp32Matrix + i * expandedDimension;
+                    float* p = pScanRow + offset;
+
+                    size_t clExtra = (((unsigned long)(pScanRow + offset) & (cacheLine - 1)) >> 2);
+
+                    size_t cacheAlignedIndex = clExtra ? (offset - clExtra + (cacheLine >> 2)) : offset;            
+                    cacheAlignedIndex = (cacheAlignedIndex < dimension) ? cacheAlignedIndex : dimension;
                     
-                        // load 1 (may be, unaligned) element
-
-                    bufLdCol[0] = pScanRow[step];
-
-                        // move to aligned run start
+                    size_t lastCacheAlignedIndex = dimension - (((unsigned long)(pScanRow + dimension) & (cacheLine - 1)) >> 2);            
+                    
+                    align_as(cacheLine) float leadColElement = pScanRow[step];
 
                     size_t col = offset;
 
-                    for(; col < runStart; ++col)
+                        // run to cache aligned
+                                
+                    for(; col < cacheAlignedIndex; ++col)
                     {
-                        pScanRow[col] -= bufLdCol[0] * pLdRow[col];
+                        pScanRow[col] -= leadColElement * pLdRow[col];
                     }
 
-                        // copy element into all 4 words
-
-                    __m128 ldCol = _mm_load1_ps(bufLdCol);
-
-                        // do main run
-
-                    for(; col < dimension; col += 4)
+                    if(col < dimension)
                     {
-                        // [col] is block aligned
+                            // copy element into all 4 words
 
-                        float *p = pScanRow + col;   
+                        __m128 ldCol = _mm_load1_ps(&leadColElement);
 
-                        _mm_store_ps(p, _mm_sub_ps(_mm_load_ps(p), _mm_mul_ps(ldCol, _mm_load_ps(pLdRow + col))));
-                    }            
+                            // do main run
+                        for(col = cacheAlignedIndex; col < lastCacheAlignedIndex; col += 4 * sseBaseCount)
+                        {
+                            float* p = pScanRow + col;
+                            float* pLd = pLdRow + col;  
+                            
+                            float* p0 = p + 0 * sseBaseCount;
+                            float* p1 = p + 1 * sseBaseCount;
+                            float* p2 = p + 2 * sseBaseCount;
+                            float* p3 = p + 3 * sseBaseCount;
+
+                            __m128 v10 = _mm_load_ps(p0);
+                            __m128 v11 = _mm_load_ps(p1);
+                            __m128 v12 = _mm_load_ps(p2);
+                            __m128 v13 = _mm_load_ps(p3);
+
+                            __m128 v20 = _mm_load_ps(pLd + 0 * sseBaseCount);
+                            __m128 v21 = _mm_load_ps(pLd + 1 * sseBaseCount);
+                            __m128 v22 = _mm_load_ps(pLd + 2 * sseBaseCount);
+                            __m128 v23 = _mm_load_ps(pLd + 3 * sseBaseCount);
+
+                            _mm_stream_ps(p0, _mm_sub_ps(v10, _mm_mul_ps(ldCol, v20)));
+                            _mm_stream_ps(p1, _mm_sub_ps(v11, _mm_mul_ps(ldCol, v21)));
+                            _mm_stream_ps(p2, _mm_sub_ps(v12, _mm_mul_ps(ldCol, v22)));
+                            _mm_stream_ps(p3, _mm_sub_ps(v13, _mm_mul_ps(ldCol, v23)));                    
+                        }     
+                            // calc tail 
+
+                        for(; col < dimension; ++col)
+                        {
+                            pScanRow[col] -= leadColElement * pLdRow[col];
+                        }                    
+                    }
+                    
+                    pScanRow += expandedDimension;
                 }
             } 
         };
 
         parallel_for(blocked_range<size_t>(step + 1, dimension), Apply(step, dimension, expandedDimension, fp32Matrix));
     }
-    */
+    //*/
+    
     void processMainBlock(size_t step)
     {        
         float* pLdRow = fp32Matrix + step * expandedDimension;
