@@ -18,6 +18,7 @@ struct Solver : public ThreadPool
     static const size_t cacheLine = 64;
 
     static const size_t sseAlignment = 16;
+    //static const size_t sseAlignment = cacheLine;
     static const size_t sseBaseCount = 4;
     static const size_t sseBlockStride = 16;
     
@@ -223,7 +224,9 @@ struct Solver : public ThreadPool
     {
         for(size_t step = 0; step < dimension; ++step)        
         {            
-            int pivotIndex = findPivot(step);            
+            //int pivotIndex = findPivot(step);            
+            
+            int pivotIndex = sseFindPivot(step);            
 
             if(pivotIndex < 0)
             {
@@ -342,7 +345,7 @@ private:
         float maxValue = 0;
 
             // tmp buffer to manipulate blocks
-        align_as(16) float buf[4]; 
+        align_as(sseAlignment) float buf[sseBaseCount]; 
         __m128* pBuf = (__m128*)buf;
 
             // find nearest block-aligned index
@@ -522,7 +525,7 @@ private:
                 divisor(argDivisor)
             {}
 
-            //*
+            /*
             void operator()(const blocked_range<size_t>& workItem) const
             {
                 size_t scanStart = workItem.begin();
@@ -535,19 +538,22 @@ private:
                     *pScan /= divisor;
                 }                
             }
-            //*/
-            /*
+            */
+            //*
             void operator()(const blocked_range<size_t>& workItem) const
             {
                 size_t scanStart = workItem.begin();
                 size_t scanStop = workItem.end();
                 
                     // find nearest block-aligned index
+                
+                //size_t extra = scanStart % sseBaseCount;
 
                 size_t blockAlignedIndex = scanStart / sseBaseCount;        
                 blockAlignedIndex *= sseBaseCount;
 
-                size_t runStart = blockAlignedIndex + ((scanStart > blockAlignedIndex) ? Solver::sseBaseCount : 0);                
+                size_t runStart = blockAlignedIndex + ((scanStart > blockAlignedIndex) ? sseBaseCount : 0);                
+                //size_t runStart = scanStart + (extra ? (sseBaseCount - extra) : 0);                
 
                 size_t runStop = scanStop / sseBaseCount;        
                 runStop *= sseBaseCount;
@@ -558,11 +564,12 @@ private:
 
                     // tmp buffer to manipulate sse blocks
 
-                align_as(16) float bufDivisor[4]; 
+                align_as(sseAlignment) float bufDivisor[sseBaseCount]; 
 
                 bufDivisor[0] = divisor;
 
                     // move to run start
+
                 size_t col = scanStart;
 
                 for(; col < runStart; ++col)
@@ -586,12 +593,12 @@ private:
                 
                     // calc tail
 
-                for(col = runStop; col < scanStop; ++col)
+                for(; col < scanStop; ++col)
                 {
                     pScanRow[col] /= bufDivisor[0];
                 }                   
             }
-            */
+            //*/
         };
 
         size_t workSize = dimension - step;
@@ -600,7 +607,7 @@ private:
         {
             float divisor = *(fp32Matrix + step * expandedDimension + step);
 
-            parallel_for(blocked_range<size_t>(step + 1, dimension), Apply(step, dimension, expandedDimension, fp32Matrix, divisor));
+            parallel_for(blocked_range<size_t>(step + 1, dimension, 2 * sseBaseCount), Apply(step, dimension, expandedDimension, fp32Matrix, divisor));
         }
         else
         {
@@ -625,7 +632,7 @@ private:
 
             // tmp buffer to manipulate sse blocks
 
-        align_as(16) float bufDivisor[4]; 
+        align_as(sseAlignment) float bufDivisor[sseBaseCount]; 
 
         bufDivisor[0] = pScanRow[step];
 
