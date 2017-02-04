@@ -234,10 +234,12 @@ struct Solver : public ThreadPool
 
             if(pivotIndex != step)
             {
-                swapColumns(step, pivotIndex);
+                //swapColumns(step, pivotIndex);
+                swapColumnsMt(step, pivotIndex);
             }
             
             divideRowElements(step);
+            //divideRowElementsMt(step);
 
             processMainBlockMt(step);
             //processMainBlock(step);
@@ -442,6 +444,48 @@ private:
         }
     }           
 
+    void swapColumnsMt(size_t c1, size_t c2)
+    {
+        class Apply
+        {
+            size_t c1;
+            size_t c2;            
+            size_t dimension;
+            size_t expandedDimension;
+            float *const fp32Matrix;            
+
+        public:
+
+            Apply(size_t argC1, size_t argC2, size_t argDimension, size_t argExpandedDimension, float* argFp32Matrix) :                 
+                c1(argC1),
+                c2(argC2),
+                dimension(argDimension),
+                expandedDimension(argExpandedDimension),
+                fp32Matrix(argFp32Matrix)                
+            {}
+            
+            void operator()(const blocked_range<size_t>& workItem) const
+            {
+                size_t scanStart = workItem.begin();
+                size_t scanStop = workItem.end();
+                
+                size_t skipOffset = scanStart * expandedDimension;
+
+                float* pScan1 = fp32Matrix + c1 + skipOffset;
+                float* pScan2 = fp32Matrix + c2 + skipOffset;
+
+                for(size_t i = scanStart; i < scanStop; ++i, pScan1 += expandedDimension, pScan2 += expandedDimension)
+                {
+                    float t = *pScan1;
+                    *pScan1 = *pScan2;
+                    *pScan2 = t;
+                }                
+            }
+        };
+
+        parallel_for(blocked_range<size_t>(0, dimension), Apply(c1, c2, dimension, expandedDimension, fp32Matrix));
+    }           
+
     /*
     void divideRowElements(size_t step)
     {
@@ -457,6 +501,112 @@ private:
         }
     }
     */
+
+    void divideRowElementsMt(size_t step)
+    {
+        class Apply
+        {
+            size_t step;
+            size_t dimension;
+            size_t expandedDimension;
+            float *const fp32Matrix;
+            float divisor;
+
+        public:
+
+            Apply(size_t argStep, size_t argDimension, size_t argExpandedDimension, float* argFp32Matrix, float argDivisor) :                 
+                step(argStep),
+                dimension(argDimension),
+                expandedDimension(argExpandedDimension),
+                fp32Matrix(argFp32Matrix),
+                divisor(argDivisor)
+            {}
+
+            //*
+            void operator()(const blocked_range<size_t>& workItem) const
+            {
+                size_t scanStart = workItem.begin();
+                size_t scanStop = workItem.end();
+
+                float* pScan = fp32Matrix + step * expandedDimension + scanStart;
+                
+                for(size_t i = scanStart; i < scanStop; ++i, ++pScan)
+                {
+                    *pScan /= divisor;
+                }                
+            }
+            //*/
+            /*
+            void operator()(const blocked_range<size_t>& workItem) const
+            {
+                size_t scanStart = workItem.begin();
+                size_t scanStop = workItem.end();
+                
+                    // find nearest block-aligned index
+
+                size_t blockAlignedIndex = scanStart / sseBaseCount;        
+                blockAlignedIndex *= sseBaseCount;
+
+                size_t runStart = blockAlignedIndex + ((scanStart > blockAlignedIndex) ? Solver::sseBaseCount : 0);                
+
+                size_t runStop = scanStop / sseBaseCount;        
+                runStop *= sseBaseCount;
+
+                float* pScanRow = fp32Matrix + step * expandedDimension;
+
+                //printf("[%u %u %u %u]", scanStart, runStart, runStop, scanStop);
+
+                    // tmp buffer to manipulate sse blocks
+
+                align_as(16) float bufDivisor[4]; 
+
+                bufDivisor[0] = divisor;
+
+                    // move to run start
+                size_t col = scanStart;
+
+                for(; col < runStart; ++col)
+                {
+                    pScanRow[col] /= bufDivisor[0];
+                }
+
+                    // copy element into all 4 words           
+                __m128 sseDivisor = _mm_load1_ps(bufDivisor);
+
+                    // do main run
+                
+                for(; col < runStop; col += sseBaseCount)
+                {
+                    // [col] is block aligned
+
+                    float *p = pScanRow + col;
+                        
+                    _mm_stream_ps(p, _mm_div_ps(_mm_load_ps(p), sseDivisor));
+                }               
+                
+                    // calc tail
+
+                for(col = runStop; col < scanStop; ++col)
+                {
+                    pScanRow[col] /= bufDivisor[0];
+                }                   
+            }
+            */
+        };
+
+        size_t workSize = dimension - step;
+
+        if(workSize >= minMtWorksize)
+        {
+            float divisor = *(fp32Matrix + step * expandedDimension + step);
+
+            parallel_for(blocked_range<size_t>(step + 1, dimension), Apply(step, dimension, expandedDimension, fp32Matrix, divisor));
+        }
+        else
+        {
+            divideRowElements(step);
+        }
+    }
 
         // single-threaded SSE version
     //*
@@ -779,7 +929,7 @@ private:
         parallel_for(blocked_range<size_t>(step + 1, dimension), Apply(step, dimension, expandedDimension, fp32Matrix));
     }
     //*/
-    
+
     void processMainBlock(size_t step)
     {        
         float* pLdRow = fp32Matrix + step * expandedDimension;
