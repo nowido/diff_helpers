@@ -281,19 +281,78 @@ struct Solver : public ThreadPool
     /////////////////////////////////////////
     double CalcResiduals()
     {
-        double* pScanRow = fp64Matrix;
+        class Apply
+        {            
+            size_t dimension;
+            size_t expandedDimension;
+            double *const fp64Matrix;
+            double *const solution;
+            double *const residuals;
+            double *const fp64Vector;
 
-        for(size_t row = 0; row < dimension; ++row, pScanRow += expandedDimension)
-        {
-            double s = 0;
+        public:
 
-            for(size_t col = 0; col < dimension; ++col)
+            Apply(size_t argDimension, size_t argExpandedDimension, double* argFp64Matrix, double* argSolution, double* argResiduals, double* argFp64Vector) :                                 
+                dimension(argDimension),
+                expandedDimension(argExpandedDimension),
+                fp64Matrix(argFp64Matrix),
+                solution(argSolution),
+                residuals(argResiduals),
+                fp64Vector(argFp64Vector)                
+            {}
+
+            /*
+            void operator()(const blocked_range<size_t>& workItem) const
             {
-                s += pScanRow[col] * solution[col];
-            }
+                size_t scanStart = workItem.begin();
+                size_t scanStop = workItem.end();
 
-            residuals[row] = fp64Vector[row] - s;
-        }
+                double* pScanRow = fp64Matrix + scanStart * expandedDimension;
+
+                for(size_t row = scanStart; row < scanStop; ++row, pScanRow += expandedDimension)
+                {
+                    double s = 0;
+
+                    for(size_t col = 0; col < dimension; ++col)
+                    {
+                        s += pScanRow[col] * solution[col];
+                    }
+
+                    residuals[row] = fp64Vector[row] - s;
+                }                
+            }
+            */
+            //*
+            void operator()(const blocked_range<size_t>& workItem) const
+            {
+                size_t scanStart = workItem.begin();
+                size_t scanStop = workItem.end();
+
+                double* pScanRow = fp64Matrix + scanStart * expandedDimension;
+
+                for(size_t row = scanStart; row < scanStop; ++row, pScanRow += expandedDimension)
+                {
+                    //align_as(sseAlignment) double s[2];
+                    align_as(sseAlignment) double s[2] = {0, 0};
+                    __m128d* pS = (__m128d*)s;
+
+                    //__m128d sse2 = _mm_set1_pd(0);
+
+                    for(size_t col = 0; col < dimension; col += 2)
+                    {
+                        //sse2 = _mm_add_pd(sse2, _mm_mul_pd(_mm_load_pd(pScanRow + col), _mm_load_pd(solution + col)));
+                        *pS = _mm_add_pd(*pS, _mm_mul_pd(_mm_load_pd(pScanRow + col), _mm_load_pd(solution + col)));
+                    }
+
+                    //_mm_store_pd(s, sse2);
+
+                    residuals[row] = fp64Vector[row] - s[0] - s[1];
+                }                
+            }    
+            //*/        
+        };
+
+        parallel_for(blocked_range<size_t>(0, dimension, 8 * sseBaseCount), Apply(dimension, expandedDimension, fp64Matrix, solution, residuals, fp64Vector)); 
 
         double s = 0;
 
@@ -304,7 +363,7 @@ struct Solver : public ThreadPool
             s += e * e;
         }
 
-        return s;        
+        return s;          
     }
 
 protected:
@@ -486,7 +545,7 @@ private:
             }
         };
 
-        parallel_for(blocked_range<size_t>(0, dimension), Apply(c1, c2, dimension, expandedDimension, fp32Matrix));
+        parallel_for(blocked_range<size_t>(0, dimension, 128 * sseBaseCount), Apply(c1, c2, dimension, expandedDimension, fp32Matrix));
     }           
 
     /*
@@ -933,6 +992,7 @@ private:
             } 
         };
 
+        //parallel_for(blocked_range<size_t>(step + 1, dimension, 4 * sseBaseCount), Apply(step, dimension, expandedDimension, fp32Matrix));
         parallel_for(blocked_range<size_t>(step + 1, dimension), Apply(step, dimension, expandedDimension, fp32Matrix));
     }
     //*/
