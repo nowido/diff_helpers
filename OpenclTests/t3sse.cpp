@@ -6,7 +6,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#include "solver7sse.h"
+#include "solver8ssewot.h"
 
 //-------------------------------------------------------------
 
@@ -79,9 +79,7 @@ int main()
     slv.useMatrix(fp32Matrix);
     slv.useVector(fp32Vector);
 
-    printf("%lu %lu ", slv.expandedDimension, slv.sseBlocksCount);
-
-    printf("cpus %lu\n", slv.ncpu);
+    printf("%lu\n", slv.expandedDimension);
 
     gettimeofday(&before, NULL);
     //for(int i = 0; i < 2; ++i)
@@ -91,7 +89,7 @@ int main()
 
     printf("Execution time: %u ms.\n", timeDifference(&before, &after) / 1000);
 
-    printf("%.15e\n", slv.CalcResiduals());
+    printf("%.7e\n", slv.CalcResiduals());
 
 cleanup:
 
