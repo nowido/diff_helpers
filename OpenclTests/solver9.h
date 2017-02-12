@@ -23,6 +23,8 @@ struct Tile
 
     float* tile;
 
+    size_t runStop;
+
     /////////////////////////////////////////
     Tile(size_t argTileRows, size_t argTileCols) :
         tileRows(argTileRows),
@@ -31,6 +33,9 @@ struct Tile
         tileSize = tileRows * tileCols;
 
         tile = (float*)aligned_alloc(SSE_ALIGNMENT, tileSize * sizeof(float));
+        
+        runStop = tileRows / SSE_BASE_COUNT;
+        runStop *= SSE_BASE_COUNT;
     }
     
     /////////////////////////////////////////
@@ -137,7 +142,7 @@ struct Tile
     }
 
     /////////////////////////////////////////
-    void updateMain
+    void updateMain1
             (
                 size_t offsetVert, 
                 size_t offsetHoriz, 
@@ -162,6 +167,57 @@ struct Tile
             }                
         }
     }    
+
+    void updateMain
+            (
+                size_t offsetVert, 
+                size_t offsetHoriz, 
+                Tile* leadRowTile, 
+                size_t leadRowVert,                  
+                const float* leadColBlock
+            )
+    {   
+        size_t leadRowTileStride = leadRowTile->tileRows;
+
+        float* pLeadRow = leadRowTile->tile + offsetHoriz * leadRowTileStride + leadRowVert;     
+
+        for(size_t col = offsetHoriz; col < tileCols; ++col, pLeadRow += leadRowTileStride)
+        {
+            size_t index = col * tileRows;
+
+                // 1. from offsetVert to aligned run start (but no more than to tileRows)
+                // 2. from aligned run start to aligned run stop
+                // 3. from aligned run stop to tileRows
+
+            size_t extra = offsetVert % SSE_BASE_COUNT;
+            size_t runStart = offsetVert + (extra ? (SSE_BASE_COUNT - extra) : 0);
+            
+            runStart = (runStart < tileRows) ? runStart : tileRows;
+
+            align_as(SSE_ALIGNMENT) float ldRowValue = *pLeadRow;
+
+            for(size_t row = offsetVert; row < runStart; ++row)
+            {
+                tile[index + row] -= leadColBlock[row] * ldRowValue;      
+            }                
+
+            __m128 ldRowValueQuad = _mm_load1_ps(&ldRowValue);
+
+            float* p = tile + index;
+
+            size_t row = runStart;
+
+            for(; row < runStop; row += SSE_BASE_COUNT)
+            {                
+                _mm_stream_ps(p + row, _mm_sub_ps(_mm_load_ps(p + row), _mm_mul_ps(_mm_load_ps(leadColBlock + row), ldRowValueQuad)));
+            }   
+                        
+            for(; row < tileRows; ++row)
+            {
+                tile[index + row] -= leadColBlock[row] * ldRowValue;      
+            }                
+        }
+    }        
 };
 
 //-------------------------------------------------------------
@@ -414,7 +470,7 @@ struct TiledMatrix
     }
 
     /////////////////////////////////////////
-    void swapRows(size_t r1, size_t r2)
+    void swapRows1(size_t r1, size_t r2)
     {
         size_t vertIndex1 = r1 / tileRows;
         size_t vertIndex2 = r2 / tileRows;
@@ -433,11 +489,109 @@ struct TiledMatrix
             }    
         }
         else
-        {            
+        {   
             for(size_t i = 0; i < tilesCountHoriz; ++i)
             {
                 tiles[index1 + i]->swapRows(inTileR1, inTileR2);
             }    
+        }
+    }    
+
+    /////////////////////////////////////////
+    void swapRows(size_t r1, size_t r2)
+    {
+        size_t vertIndex1 = r1 / tileRows;
+        size_t vertIndex2 = r2 / tileRows;
+
+        size_t inTileR1 = r1 - vertIndex1 * tileRows;
+        size_t inTileR2 = r2 - vertIndex2 * tileRows;
+
+        size_t index1 = vertIndex1 * tilesCountHoriz;
+        size_t index2 = vertIndex2 * tilesCountHoriz;
+
+        if(vertIndex1 != vertIndex2)
+        {      
+            class Apply
+            {
+                TiledMatrix* host;
+                size_t index1;
+                size_t index2;
+                size_t inTileR1;
+                size_t inTileR2;
+
+            public:
+
+                Apply(TiledMatrix* argHost, size_t argIndex1, size_t argIndex2, size_t argInTileR1, size_t argInTileR2):
+                    host(argHost),
+                    index1(argIndex1),
+                    index2(argIndex2),
+                    inTileR1(argInTileR1),
+                    inTileR2(argInTileR2)                                        
+                {}
+
+                void operator()(const blocked_range<size_t>& workItem) const
+                {
+                    size_t start = workItem.begin();
+                    size_t stop = workItem.end();
+
+                    Tile** tiles = host->tiles;
+
+                    for(size_t i = start; i < stop; ++i)
+                    {
+                        host->swapRows(tiles[index1 + i], tiles[index2 + i], inTileR1, inTileR2);
+                    }                        
+                }
+            };         
+
+            parallel_for
+            (
+                blocked_range<size_t>(0, tilesCountHoriz), 
+                Apply(this, index1, index2, inTileR1, inTileR2)
+            ); 
+        }
+        else
+        {   
+            class Apply
+            {
+                Tile** tiles;
+                size_t index;
+                size_t inTileR1;
+                size_t inTileR2;
+
+            public:
+
+                Apply
+                (
+                    Tile** argTiles,
+                    size_t argIndex,
+                    size_t argInTileR1,
+                    size_t argInTileR2                    
+                )
+                    :
+
+                    tiles(argTiles),
+                    index(argIndex),
+                    inTileR1(argInTileR1),
+                    inTileR2(argInTileR2)                                        
+                {}
+
+                void operator()(const blocked_range<size_t>& workItem) const
+                {
+                    size_t start = workItem.begin();
+                    size_t stop = workItem.end();
+
+                    for(size_t i = start; i < stop; ++i)
+                    {
+                        tiles[index + i]->swapRows(inTileR1, inTileR2);
+                    }                        
+                }
+            };         
+
+            parallel_for
+            (
+                blocked_range<size_t>(0, tilesCountHoriz), 
+                Apply(tiles, index1, inTileR1, inTileR2)
+            ); 
         }
     }    
 
@@ -484,7 +638,7 @@ struct TiledMatrix
     }
 
     /////////////////////////////////////////
-    void updateMain(size_t step)
+    void updateMain1(size_t step)
     {
         size_t leadColTileHorizIndex = step / tileCols;
         size_t leadRowTileVertIndex = step / tileRows;
@@ -578,6 +732,156 @@ struct TiledMatrix
                 curentTile->updateMain(0, 0, leadRowTile, inLeadRowTileVertOffset, leadColBlock);
             }
         }    
+    }
+
+    void updateMain(size_t step)
+    {
+        size_t leadColTileHorizIndex = step / tileCols;
+        size_t leadRowTileVertIndex = step / tileRows;
+
+        size_t inLeadColTileHorizOffset = step - leadColTileHorizIndex * tileCols;
+        size_t inLeadRowTileVertOffset = step - leadRowTileVertIndex * tileRows;
+
+            //
+
+        size_t offset = step + 1;
+
+        size_t tileHorizIndex = offset / tileCols;
+        size_t tileVertIndex = offset / tileRows;
+
+        size_t inTileHorizOffset = offset - tileHorizIndex * tileCols;
+        size_t inTileVertOffset = offset - tileVertIndex * tileRows;
+
+            //
+
+        size_t index = tileVertIndex * tilesCountHoriz + tileHorizIndex;
+
+        size_t leadColTileIndex = tileVertIndex * tilesCountHoriz + leadColTileHorizIndex;
+        size_t leadRowTileIndex = leadRowTileVertIndex * tilesCountHoriz + tileHorizIndex;
+
+        Tile* curentTile = tiles[index];
+
+        Tile* leadColTile = tiles[leadColTileIndex];
+        float* leadColBlock = leadColTile->tile + inLeadColTileHorizOffset * (leadColTile->tileRows);
+
+        Tile* leadRowTile = tiles[leadRowTileIndex];
+
+            // first tile
+
+        curentTile->updateMain(inTileVertOffset, inTileHorizOffset, leadRowTile, inLeadRowTileVertOffset, leadColBlock);
+
+            //
+
+        size_t bulkStartHoriz = tileHorizIndex + 1;
+        size_t bulkStartVert = tileVertIndex + 1;
+        
+            // next tiles in row
+
+        ++index;
+        ++leadRowTileIndex;
+
+        for(size_t i = bulkStartHoriz; i < tilesCountHoriz; ++i, ++index, ++leadRowTileIndex)
+        {
+            curentTile = tiles[index];
+            leadRowTile = tiles[leadRowTileIndex];
+
+            curentTile->updateMain(inTileVertOffset, 0, leadRowTile, inLeadRowTileVertOffset, leadColBlock);
+        }     
+
+            // next tiles in col
+
+        leadRowTileIndex = leadRowTileVertIndex * tilesCountHoriz + tileHorizIndex;
+        leadRowTile = tiles[leadRowTileIndex];
+        
+        index += tileHorizIndex;
+        
+        leadColTileIndex += tilesCountHoriz;
+
+        for(size_t i = bulkStartVert; i < tilesCountVert; ++i, index += tilesCountHoriz, leadColTileIndex += tilesCountHoriz) 
+        {
+            curentTile = tiles[index];
+
+            leadColTile = tiles[leadColTileIndex];
+            float* leadColBlock = leadColTile->tile + inLeadColTileHorizOffset * (leadColTile->tileRows);
+
+            curentTile->updateMain(0, inTileHorizOffset, leadRowTile, inLeadRowTileVertOffset, leadColBlock);
+        }   
+
+            // main tiles bulk
+        
+        class Apply
+        {
+            Tile** tiles;
+            size_t tilesCountHoriz; 
+            size_t leadColTileHorizIndex; 
+            size_t inLeadColTileHorizOffset; 
+            size_t inLeadRowTileVertOffset;
+            size_t leadRowTileVertIndex;
+            size_t bulkStartHoriz;                
+
+        public:
+
+            Apply
+            (
+                Tile** argTiles,
+                size_t argTilesCountHoriz, 
+                size_t argLeadColTileHorizIndex, 
+                size_t argInLeadColTileHorizOffset, 
+                size_t argInLeadRowTileVertOffset,
+                size_t argLeadRowTileVertIndex,
+                size_t argBulkStartHoriz                
+            )
+                :                    
+                tiles(argTiles),
+                tilesCountHoriz(argTilesCountHoriz),
+                leadColTileHorizIndex(argLeadColTileHorizIndex),
+                inLeadColTileHorizOffset(argInLeadColTileHorizOffset),
+                inLeadRowTileVertOffset(argInLeadRowTileVertOffset),
+                leadRowTileVertIndex(argLeadRowTileVertIndex),
+                bulkStartHoriz(argBulkStartHoriz)  
+            {}
+
+            void operator()(const blocked_range<size_t>& workItem) const
+            {
+                size_t startIndex = workItem.begin();
+                size_t stopIndex = workItem.end();
+
+                size_t leadColTileIndex = startIndex * tilesCountHoriz + leadColTileHorizIndex;
+
+                for(size_t i = startIndex; i < stopIndex; ++i, leadColTileIndex += tilesCountHoriz)
+                {                                
+                    Tile* leadColTile = tiles[leadColTileIndex];
+                    float* leadColBlock = leadColTile->tile + inLeadColTileHorizOffset * (leadColTile->tileRows);
+                    
+                    size_t leadRowTileIndex = leadRowTileVertIndex * tilesCountHoriz + bulkStartHoriz;
+
+                    for(size_t j = bulkStartHoriz; j < tilesCountHoriz; ++j, ++leadRowTileIndex)
+                    {                
+                        Tile* leadRowTile = tiles[leadRowTileIndex];
+
+                        size_t index = i * tilesCountHoriz + j;
+                        Tile* curentTile = tiles[index];
+                        
+                        curentTile->updateMain(0, 0, leadRowTile, inLeadRowTileVertOffset, leadColBlock);
+                    }
+                }    
+            }
+        };
+
+        parallel_for
+        (
+            blocked_range<size_t>(bulkStartVert, tilesCountVert), 
+            Apply
+            (
+                tiles, 
+                tilesCountHoriz, 
+                leadColTileHorizIndex, 
+                inLeadColTileHorizOffset, 
+                inLeadRowTileVertOffset, 
+                leadRowTileVertIndex, 
+                bulkStartHoriz
+            )
+        ); 
     }
 
     /////////////////////////////////////////
