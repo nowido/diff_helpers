@@ -6,7 +6,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#include "solver8ssewot.h"
+#include "solver9.h"
 
 //-------------------------------------------------------------
 
@@ -82,8 +82,9 @@ int main()
     printf("%lu\n", slv.expandedDimension);
 
     gettimeofday(&before, NULL);
-    //for(int i = 0; i < 2; ++i)
+    
     //slv.Solve();
+
     slv.Iterate(3);
     gettimeofday(&after, NULL);
 
