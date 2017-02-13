@@ -5,7 +5,7 @@
 
 #include <windows.h>
 
-#include "solver7sse.h"
+#include "solver9.h"
 
 //-------------------------------------------------------------
 
@@ -88,9 +88,7 @@ int main()
     slv.useMatrix(fp32Matrix);
     slv.useVector(fp32Vector);
 
-    printf("%lu %lu ", slv.expandedDimension, slv.sseBlocksCount);
-
-    printf("cpus %lu\n", slv.ncpu);
+    printf("%lu\n", slv.expandedDimension);
 
     GetSystemTimeAsFileTime(&before);
     slv.Iterate(3);
