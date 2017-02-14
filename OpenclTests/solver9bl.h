@@ -8,6 +8,8 @@
 
 #include "memalign.h"
 
+#define TILE_SIDE 64
+
 //-------------------------------------------------------------
 
 using namespace tbb;
@@ -23,6 +25,8 @@ struct Tile
 
     float* tile;
 
+    float* rowMajor;
+
     size_t runStop;
 
     /////////////////////////////////////////
@@ -34,6 +38,8 @@ struct Tile
 
         tile = (float*)aligned_alloc(CACHE_LINE, tileSize * sizeof(float));
         
+        rowMajor = (float*)aligned_alloc(CACHE_LINE, tileSize * sizeof(float));
+
         runStop = tileRows / SSE_BASE_COUNT;
         runStop *= SSE_BASE_COUNT;
     }
@@ -92,6 +98,22 @@ struct Tile
     ~Tile()
     {
         aligned_free(tile);
+    }
+
+    /////////////////////////////////////////
+    void updateRowMajor()
+    {
+        float* pSrc = tile;
+
+        for(size_t col = 0; col < tileCols; ++col)
+        {
+            float* pDest = rowMajor + col;
+
+            for(size_t row = 0; row < tileRows; ++row, ++pSrc, pDest += tileCols)
+            {
+                *pDest = *pSrc;                
+            }
+        }        
     }
 
     /////////////////////////////////////////
@@ -257,7 +279,7 @@ struct Tile
     }
 
     /////////////////////////////////////////
-    void subtractProduct(const Tile* left, const Tile* top)
+    void subtractProduct1(const Tile* left, const Tile* top)
     {
         size_t leftTileRows = left->tileRows;
         size_t topTileRows = top->tileRows;
@@ -283,13 +305,45 @@ struct Tile
             }
         }
     }
+
+    /////////////////////////////////////////
+    void subtractProduct(const Tile* left, const Tile* top)
+    {
+        size_t leftTileRows = left->tileRows;
+        size_t leftTileCols = left->tileCols;
+        size_t topTileRows = top->tileRows;
+        
+        float* pDest = tile;
+
+        float* colData = top->tile;
+
+        align_as(SSE_ALIGNMENT) float buf[SSE_BASE_COUNT];                
+        __m128* pSumValue = (__m128*)buf;
+
+        for(size_t col = 0; col < tileCols; ++col, colData += topTileRows)        
+        {       
+            for(size_t row = 0; row < tileRows; ++row, ++pDest)
+            {                                
+                *pSumValue = _mm_setzero_ps();
+
+                float* rowData = left->rowMajor + row * leftTileCols;
+
+                for(size_t depth = 0; depth < topTileRows; depth += SSE_BASE_COUNT)
+                {
+                    *pSumValue = _mm_add_ps(*pSumValue, _mm_mul_ps(_mm_load_ps(rowData + depth), _mm_load_ps(colData + depth)));
+                }
+
+                (*pDest) -= (buf[0] + buf[1] + buf[2] + buf[3]);
+            }
+        }
+    }    
 };
 
 //-------------------------------------------------------------
 
 struct TiledMatrix
 {
-    static const size_t tileRows = 16;
+    static const size_t tileRows = TILE_SIDE;
     static const size_t tileCols = tileRows;
     
     size_t dimension;
@@ -715,6 +769,8 @@ struct TiledMatrix
                 for(size_t i = start; i < stop; ++i, rowScanIndex += tilesCountHoriz)
                 {
                     Tile* left = tiles[rowScanIndex + panelDiagIndex];
+
+                    left->updateRowMajor();
 
                     for(size_t j = offset; j < tilesCountHoriz; ++j)
                     {                
