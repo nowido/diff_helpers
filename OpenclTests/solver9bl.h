@@ -232,13 +232,13 @@ struct Tile
     }
 
     /////////////////////////////////////////
-    void solveTriangle(float* triangleBlock)
+    void solveTriangle(const float* triangleBlock)
     {   
         float* column = tile;
 
         for(size_t col = 0; col < tileCols; ++col, column += tileRows)
         {            
-            float* pTriScan = triangleBlock;
+            const float* pTriScan = triangleBlock;
             
             for(size_t row = 1; row < tileRows; ++row)
             {
@@ -289,8 +289,8 @@ struct Tile
 
 struct TiledMatrix
 {
-    static const size_t tileRows = 64;
-    static const size_t tileCols = 64;
+    static const size_t tileRows = 16;
+    static const size_t tileCols = tileRows;
     
     size_t dimension;
 
@@ -600,14 +600,14 @@ struct TiledMatrix
     }
 
     /////////////////////////////////////////
-    void triangleSolve(size_t panelDiagIndex)
+    void triangleSolve1(size_t panelDiagIndex)
     {   
         size_t triTileIndex = panelDiagIndex * tilesCountHoriz + panelDiagIndex;
         
         Tile* triTile = tiles[triTileIndex];
 
         triTile->ExtractTriangle(triangleBlock);
-        
+                
         for(size_t i = panelDiagIndex + 1, index = triTileIndex + 1; i < tilesCountHoriz; ++i, ++index)
         {
             tiles[index]->solveTriangle(triangleBlock);
@@ -615,7 +615,50 @@ struct TiledMatrix
     }
 
     /////////////////////////////////////////
-    void updateTrailingSubmatrix(size_t panelDiagIndex)
+    void triangleSolve(size_t panelDiagIndex)
+    {   
+        size_t triTileIndex = panelDiagIndex * tilesCountHoriz + panelDiagIndex;
+        
+        tiles[triTileIndex]->ExtractTriangle(triangleBlock);
+        
+        class Apply
+        {
+            size_t panelDiagIndex;
+            size_t tilesCountHoriz;
+            const float* triangleBlock;
+            Tile** tiles;
+                        
+        public:
+
+            Apply(size_t argPanelDiagIndex, size_t argTilesCountHoriz, const float* argTriangleBlock, Tile** argTiles) :
+
+                panelDiagIndex(argPanelDiagIndex), 
+                tilesCountHoriz(argTilesCountHoriz),
+                triangleBlock(argTriangleBlock),               
+                tiles(argTiles)
+            {}    
+
+            void operator()(const blocked_range<size_t>& workItem) const
+            {
+                size_t start = workItem.begin();
+                size_t stop = workItem.end();
+
+                for(size_t i = start, index = panelDiagIndex * tilesCountHoriz + start; i < stop; ++i, ++index)
+                {
+                    tiles[index]->solveTriangle(triangleBlock);
+                }
+            }
+        };
+
+        parallel_for
+        (
+            blocked_range<size_t>(panelDiagIndex + 1, tilesCountHoriz), 
+            Apply(panelDiagIndex, tilesCountHoriz, triangleBlock, tiles)
+        ); 
+    }
+
+    /////////////////////////////////////////
+    void updateTrailingSubmatrix1(size_t panelDiagIndex)
     {
         size_t offset = panelDiagIndex + 1;
         
@@ -635,7 +678,61 @@ struct TiledMatrix
     }
 
     /////////////////////////////////////////
-    void swapRows(size_t r1, size_t r2)
+    void updateTrailingSubmatrix(size_t panelDiagIndex)
+    {
+        size_t offset = panelDiagIndex + 1;
+        
+        size_t rowScanIndex = offset * tilesCountHoriz;
+
+        size_t topStart = panelDiagIndex * tilesCountHoriz;
+
+        class Apply
+        {
+            size_t panelDiagIndex;
+            size_t tilesCountHoriz;
+            Tile** tiles;
+                        
+        public:
+
+            Apply(size_t argPanelDiagIndex, size_t argTilesCountHoriz, Tile** argTiles) :
+
+                panelDiagIndex(argPanelDiagIndex),
+                tilesCountHoriz(argTilesCountHoriz),
+                tiles(argTiles)
+            {}    
+
+            void operator()(const blocked_range<size_t>& workItem) const
+            {
+                size_t start = workItem.begin();
+                size_t stop = workItem.end();
+
+                size_t offset = panelDiagIndex + 1;
+                
+                size_t rowScanIndex = start * tilesCountHoriz;
+
+                size_t topStart = panelDiagIndex * tilesCountHoriz;
+
+                for(size_t i = start; i < stop; ++i, rowScanIndex += tilesCountHoriz)
+                {
+                    Tile* left = tiles[rowScanIndex + panelDiagIndex];
+
+                    for(size_t j = offset; j < tilesCountHoriz; ++j)
+                    {                
+                        tiles[rowScanIndex + j]->subtractProduct(left, tiles[topStart + j]);
+                    }
+                }
+            }
+        };
+
+        parallel_for
+        (
+            blocked_range<size_t>(offset, tilesCountVert), 
+            Apply(panelDiagIndex, tilesCountHoriz, tiles)
+        ); 
+    }
+
+    /////////////////////////////////////////
+    void swapRows1(size_t r1, size_t r2)
     {
         size_t vertIndex1 = r1 / tileRows;
         size_t vertIndex2 = r2 / tileRows;
@@ -662,6 +759,104 @@ struct TiledMatrix
         }
     }    
 
+    /////////////////////////////////////////
+    void swapRows(size_t r1, size_t r2)
+    {
+        size_t vertIndex1 = r1 / tileRows;
+        size_t vertIndex2 = r2 / tileRows;
+
+        size_t inTileR1 = r1 - vertIndex1 * tileRows;
+        size_t inTileR2 = r2 - vertIndex2 * tileRows;
+
+        size_t index1 = vertIndex1 * tilesCountHoriz;
+        size_t index2 = vertIndex2 * tilesCountHoriz;
+
+        if(vertIndex1 != vertIndex2)
+        {      
+            class Apply
+            {
+                TiledMatrix* host;
+                size_t index1;
+                size_t index2;
+                size_t inTileR1;
+                size_t inTileR2;
+
+            public:
+
+                Apply(TiledMatrix* argHost, size_t argIndex1, size_t argIndex2, size_t argInTileR1, size_t argInTileR2):
+                    host(argHost),
+                    index1(argIndex1),
+                    index2(argIndex2),
+                    inTileR1(argInTileR1),
+                    inTileR2(argInTileR2)                                        
+                {}
+
+                void operator()(const blocked_range<size_t>& workItem) const
+                {
+                    size_t start = workItem.begin();
+                    size_t stop = workItem.end();
+
+                    Tile** tiles = host->tiles;
+
+                    for(size_t i = start; i < stop; ++i)
+                    {
+                        host->swapRows(tiles[index1 + i], tiles[index2 + i], inTileR1, inTileR2);
+                    }                        
+                }
+            };         
+
+            parallel_for
+            (
+                blocked_range<size_t>(0, tilesCountHoriz), 
+                Apply(this, index1, index2, inTileR1, inTileR2)
+            ); 
+        }
+        else
+        {   
+            class Apply
+            {
+                Tile** tiles;
+                size_t index;
+                size_t inTileR1;
+                size_t inTileR2;
+
+            public:
+
+                Apply
+                (
+                    Tile** argTiles,
+                    size_t argIndex,
+                    size_t argInTileR1,
+                    size_t argInTileR2                    
+                )
+                    :
+
+                    tiles(argTiles),
+                    index(argIndex),
+                    inTileR1(argInTileR1),
+                    inTileR2(argInTileR2)                                        
+                {}
+
+                void operator()(const blocked_range<size_t>& workItem) const
+                {
+                    size_t start = workItem.begin();
+                    size_t stop = workItem.end();
+
+                    for(size_t i = start; i < stop; ++i)
+                    {
+                        tiles[index + i]->swapRows(inTileR1, inTileR2);
+                    }                        
+                }
+            };         
+
+            parallel_for
+            (
+                blocked_range<size_t>(0, tilesCountHoriz), 
+                Apply(tiles, index1, inTileR1, inTileR2)
+            ); 
+        }
+    }    
+    
     /////////////////////////////////////////
     // debug
     void printMatrix()
