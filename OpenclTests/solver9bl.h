@@ -1,5 +1,5 @@
-#ifndef SOLVER9_H
-#define SOLVER9_H
+#ifndef SOLVER9BL_H
+#define SOLVER9BL_H
 
 #include <tbb/tbb.h>
 
@@ -106,25 +106,19 @@ struct Tile
     }
 
     /////////////////////////////////////////
-    int findPivot(size_t offsetVert, size_t offsetHoriz)
-    {
-        int pivotIndex = -1;        
-        float maxValue = 0;
-        
-        float* pScan = tile + offsetHoriz * tileRows + offsetVert;
+    void ExtractTriangle(float* dest)
+    {        
+        float* pDest = dest;
 
-        for(size_t row = offsetVert; row < tileRows; ++row, ++pScan)
+        for(size_t row = 1; row < tileRows; ++row)        
         {
-            float fav = fabs(*pScan);
+            float* pSrc = tile + row; 
 
-            if(fav > maxValue)
+            for(size_t col = 0; col < row; ++col, pSrc += tileRows, ++pDest)    
             {
-                maxValue = fav;
-                pivotIndex = row;
-            }
+                *pDest = *pSrc;
+            }            
         }
-
-        return pivotIndex;                
     }
 
     /////////////////////////////////////////
@@ -164,11 +158,11 @@ struct Tile
     }   
 
     /////////////////////////////////////////
-    void scaleColumn(size_t offsetVert, size_t offsetHoriz, float divisor)
+    void scaleRightmost(float divisor)
     {
-        float* pScan = tile + offsetHoriz * tileRows + offsetVert;
+        float* pScan = tile + (tileCols - 1) * tileRows;
 
-        for(size_t row = offsetVert; row < tileRows; ++row, ++pScan)
+        for(size_t row = 0; row < tileRows; ++row, ++pScan)
         {
             *pScan /= divisor;
         }        
@@ -205,23 +199,28 @@ struct Tile
 
         float* column = leadCol + tileRows;
 
+        float ldRowValue = leadRowBlock[offsetHoriz];
+
         for(size_t i = offsetVert; i < tileRows; ++i)
         {
-            float v = (column[i] -= leadCol[i] * leadRowBlock[offsetHoriz]);
+            float v = (column[i] -= leadCol[i] * ldRowValue);
 
             float fav = fabs(v);
-            
-            maxValue = (fav > maxValue) ? fav : maxValue;
-            pivotIndex = (fav > maxValue) ? i : pivotIndex;
-        }   
 
+            if(fav > maxValue)
+            {                
+                maxValue = fav;
+                pivotIndex = i;                
+            }            
+        }   
+                        
             // process other cols of update area
         
         column += tileRows;
 
         for(size_t j = offsetHoriz + 1; j < tileCols; ++j, column += tileRows)
         {
-            float ldRowValue = leadRowBlock[j];
+            ldRowValue = leadRowBlock[j];
 
             for(size_t i = offsetVert; i < tileRows; ++i)
             {
@@ -233,40 +232,65 @@ struct Tile
     }
 
     /////////////////////////////////////////
-    void updateMain
-            (
-                size_t offsetVert, 
-                size_t offsetHoriz, 
-                Tile* leadRowTile, 
-                size_t leadRowVert,                  
-                const float* leadColBlock
-            )
+    void solveTriangle(float* triangleBlock)
     {   
-        size_t leadRowTileStride = leadRowTile->tileRows;
+        float* column = tile;
 
-        float* pLeadRow = leadRowTile->tile + offsetHoriz * leadRowTileStride + leadRowVert;     
-
-        for(size_t col = offsetHoriz; col < tileCols; ++col, pLeadRow += leadRowTileStride)
-        {
-            size_t index = col * tileRows;
-
-            float ldRowValue = *pLeadRow;
-
-            for(size_t row = offsetVert; row < tileRows; ++row)
+        for(size_t col = 0; col < tileCols; ++col, column += tileRows)
+        {            
+            float* pTriScan = triangleBlock;
+            
+            for(size_t row = 1; row < tileRows; ++row)
             {
-                tile[index + row] -= leadColBlock[row] * ldRowValue;      
-            }                
-        }
-    }    
+                float* inTile = column;  
 
+                float s = 0;
+
+                for(size_t depth = 0; depth < row; ++depth, ++pTriScan, ++inTile)
+                {
+                    s += (*pTriScan) * (*inTile);
+                }
+
+                (*inTile) -= s;
+            }
+        }    
+    }
+
+    /////////////////////////////////////////
+    void subtractProduct(const Tile* left, const Tile* top)
+    {
+        size_t leftTileRows = left->tileRows;
+        size_t topTileRows = top->tileRows;
+        
+        float* pDest = tile;
+
+        float* colData = top->tile;
+
+        for(size_t col = 0; col < tileCols; ++col, colData += topTileRows)        
+        {       
+            for(size_t row = 0; row < tileRows; ++row, ++pDest)
+            {
+                float* rowData = left->tile + row;
+
+                float s = 0;
+                
+                for(size_t depth = 0, rowDataIndex = 0; depth < topTileRows; ++depth, rowDataIndex += leftTileRows)
+                {
+                    s += rowData[rowDataIndex] * colData[depth];
+                }
+
+                (*pDest) -= s;
+            }
+        }
+    }
 };
 
 //-------------------------------------------------------------
 
 struct TiledMatrix
 {
-    static const size_t tileRows = 128;
-    static const size_t tileCols = 128;
+    static const size_t tileRows = 64;
+    static const size_t tileCols = 64;
     
     size_t dimension;
 
@@ -282,6 +306,7 @@ struct TiledMatrix
     Tile** tiles;
 
     float* leadRowBlock;
+    float* triangleBlock;
 
     /////////////////////////////////////////
     TiledMatrix(size_t argDimension) :
@@ -327,6 +352,10 @@ struct TiledMatrix
         }
 
         leadRowBlock = (float*)aligned_alloc(CACHE_LINE, tileCols * sizeof(float));
+
+        size_t triangleSize = (tileRows * tileCols - tileCols) / 2;
+
+        triangleBlock = (float*)aligned_alloc(CACHE_LINE, triangleSize * sizeof(float));
     }   
 
     /////////////////////////////////////////
@@ -345,6 +374,7 @@ struct TiledMatrix
         free(tiles);
 
         aligned_free(leadRowBlock);
+        aligned_free(triangleBlock);
     } 
 
     /////////////////////////////////////////
@@ -463,25 +493,27 @@ struct TiledMatrix
 
     /////////////////////////////////////////
     bool factorizePanel(size_t panelDiagIndex, int* permutations)
-    {   
+    {           
         size_t topTileIndex = panelDiagIndex * tilesCountHoriz + panelDiagIndex;
+
+        size_t diagSteps = tiles[topTileIndex]->tileCols;
 
             // find pivot in leftmost col
 
         int pivotIndex = -1;
         float pivotValue = 0;
 
-        Tile* curentTile;
+        Tile* currentTile;
 
         for(size_t i = panelDiagIndex, index = topTileIndex; i < tilesCountVert; ++i, index += tilesCountHoriz)
         {
-            curentTile = tiles[index];
+            currentTile = tiles[index];
 
-            int localPivotIndex = curentTile->findPivotLeftmost(); 
+            int localPivotIndex = currentTile->findPivotLeftmost(); 
 
             if(localPivotIndex > -1)
             {
-                float fav = fabs(curentTile->tile[localPivotIndex]);
+                float fav = fabs(currentTile->tile[localPivotIndex]);
 
                 if(fav > pivotValue)
                 {
@@ -507,11 +539,11 @@ struct TiledMatrix
 
             // go on diagonal of top tile
 
-        for(size_t diag = 1, matrixRow = topRowIndex + 1; diag < tileCols; ++diag, ++matrixRow)
+        for(size_t diag = 1, matrixRow = topRowIndex + 1; diag < diagSteps; ++diag, ++matrixRow)
         {
-            curentTile = tiles[topTileIndex];
+            currentTile = tiles[topTileIndex];
 
-            curentTile->ExtractRow(diag - 1, leadRowBlock);
+            currentTile->ExtractRow(diag - 1, leadRowBlock);
 
             // update all tiles in 'tile column'
 
@@ -522,13 +554,13 @@ struct TiledMatrix
 
             for(size_t i = panelDiagIndex, index = topTileIndex; i < tilesCountVert; ++i, index += tilesCountHoriz)
             {
-                curentTile = tiles[index];
-
-                int localPivotIndex = curentTile->updateWithScaleAndNextPivotSearch(((i > panelDiagIndex) ? 0 : diag), diag, leadRowBlock);
+                currentTile = tiles[index];
+                
+                int localPivotIndex = currentTile->updateWithScaleAndNextPivotSearch(((i > panelDiagIndex) ? 0 : diag), diag, leadRowBlock);
 
                 if(localPivotIndex > -1)
                 {
-                    float fav = fabs(curentTile->tile[diag * (curentTile->tileRows) + localPivotIndex]);
+                    float fav = fabs(currentTile->tile[diag * (currentTile->tileRows) + localPivotIndex]);
 
                     if(fav > pivotValue)
                     {
@@ -551,62 +583,55 @@ struct TiledMatrix
             }
         }
             
+            // scale rightmost col
+        
+        currentTile = tiles[topTileIndex];
+
+        float divisor = currentTile->tile[(currentTile->tileCols * currentTile->tileRows) - 1];
+
+        for(size_t i = panelDiagIndex + 1, index = topTileIndex + tilesCountHoriz; i < tilesCountVert; ++i, index += tilesCountHoriz)
+        {
+            tiles[index]->scaleRightmost(divisor);
+        }
+
+            //
+
         return true;
     }
 
     /////////////////////////////////////////
-    int findPivot(size_t step)
+    void triangleSolve(size_t panelDiagIndex)
+    {   
+        size_t triTileIndex = panelDiagIndex * tilesCountHoriz + panelDiagIndex;
+        
+        Tile* triTile = tiles[triTileIndex];
+
+        triTile->ExtractTriangle(triangleBlock);
+        
+        for(size_t i = panelDiagIndex + 1, index = triTileIndex + 1; i < tilesCountHoriz; ++i, ++index)
+        {
+            tiles[index]->solveTriangle(triangleBlock);
+        }
+    }
+
+    /////////////////////////////////////////
+    void updateTrailingSubmatrix(size_t panelDiagIndex)
     {
-        size_t tileHorizIndex = step / tileCols;
-        size_t tileVertIndex = step / tileRows;
-
-        size_t inTileHorizOffset = step - tileHorizIndex * tileCols;
-        size_t inTileVertOffset = step - tileVertIndex * tileRows;
-
-        size_t index = tileVertIndex * tilesCountHoriz + tileHorizIndex;
-
-        int pivotIndex = -1;
-        float pivotValue = 0;
-
-            // first tile
+        size_t offset = panelDiagIndex + 1;
         
-        Tile* curentTile = tiles[index];
-                
-        int localPivotIndex = curentTile->findPivot(inTileVertOffset, inTileHorizOffset); 
+        size_t rowScanIndex = offset * tilesCountHoriz;
 
-        if(localPivotIndex > -1)
+        size_t topStart = panelDiagIndex * tilesCountHoriz;
+
+        for(size_t i = offset; i < tilesCountVert; ++i, rowScanIndex += tilesCountHoriz)
         {
-            float fav = fabs(curentTile->tile[inTileHorizOffset * (curentTile->tileRows) + localPivotIndex]);
+            Tile* left = tiles[rowScanIndex + panelDiagIndex];
 
-            if(fav > pivotValue)
-            {
-                pivotValue = fav;
-                pivotIndex = tileVertIndex * tileRows + localPivotIndex;
+            for(size_t j = offset; j < tilesCountHoriz; ++j)
+            {                
+                tiles[rowScanIndex + j]->subtractProduct(left, tiles[topStart + j]);
             }
         }
-            // next tiles in 'tile column'
-        
-        index += tilesCountHoriz;
-
-        for(size_t i = tileVertIndex + 1; i < tilesCountVert; ++i, index += tilesCountHoriz)
-        {
-            curentTile = tiles[index];
-
-            localPivotIndex = curentTile->findPivot(0, inTileHorizOffset); 
-
-            if(localPivotIndex > -1)
-            {
-                float fav = fabs(curentTile->tile[inTileHorizOffset * (curentTile->tileRows) + localPivotIndex]);
-
-                if(fav > pivotValue)
-                {
-                    pivotValue = fav;
-                    pivotIndex = i * tileRows + localPivotIndex;
-                }
-            }
-        }
-
-        return pivotIndex;
     }
 
     /////////////////////////////////////////
@@ -636,393 +661,6 @@ struct TiledMatrix
             }    
         }
     }    
-
-    /////////////////////////////////////////
-    void swapRows1(size_t r1, size_t r2)
-    {
-        size_t vertIndex1 = r1 / tileRows;
-        size_t vertIndex2 = r2 / tileRows;
-
-        size_t inTileR1 = r1 - vertIndex1 * tileRows;
-        size_t inTileR2 = r2 - vertIndex2 * tileRows;
-
-        size_t index1 = vertIndex1 * tilesCountHoriz;
-        size_t index2 = vertIndex2 * tilesCountHoriz;
-
-        if(vertIndex1 != vertIndex2)
-        {      
-            class Apply
-            {
-                TiledMatrix* host;
-                size_t index1;
-                size_t index2;
-                size_t inTileR1;
-                size_t inTileR2;
-
-            public:
-
-                Apply(TiledMatrix* argHost, size_t argIndex1, size_t argIndex2, size_t argInTileR1, size_t argInTileR2):
-                    host(argHost),
-                    index1(argIndex1),
-                    index2(argIndex2),
-                    inTileR1(argInTileR1),
-                    inTileR2(argInTileR2)                                        
-                {}
-
-                void operator()(const blocked_range<size_t>& workItem) const
-                {
-                    size_t start = workItem.begin();
-                    size_t stop = workItem.end();
-
-                    Tile** tiles = host->tiles;
-
-                    for(size_t i = start; i < stop; ++i)
-                    {
-                        host->swapRows(tiles[index1 + i], tiles[index2 + i], inTileR1, inTileR2);
-                    }                        
-                }
-            };         
-
-            parallel_for
-            (
-                blocked_range<size_t>(0, tilesCountHoriz), 
-                Apply(this, index1, index2, inTileR1, inTileR2)
-            ); 
-        }
-        else
-        {   
-            class Apply
-            {
-                Tile** tiles;
-                size_t index;
-                size_t inTileR1;
-                size_t inTileR2;
-
-            public:
-
-                Apply
-                (
-                    Tile** argTiles,
-                    size_t argIndex,
-                    size_t argInTileR1,
-                    size_t argInTileR2                    
-                )
-                    :
-
-                    tiles(argTiles),
-                    index(argIndex),
-                    inTileR1(argInTileR1),
-                    inTileR2(argInTileR2)                                        
-                {}
-
-                void operator()(const blocked_range<size_t>& workItem) const
-                {
-                    size_t start = workItem.begin();
-                    size_t stop = workItem.end();
-
-                    for(size_t i = start; i < stop; ++i)
-                    {
-                        tiles[index + i]->swapRows(inTileR1, inTileR2);
-                    }                        
-                }
-            };         
-
-            parallel_for
-            (
-                blocked_range<size_t>(0, tilesCountHoriz), 
-                Apply(tiles, index1, inTileR1, inTileR2)
-            ); 
-        }
-    }    
-
-    /////////////////////////////////////////
-    void scaleColumn(size_t step)
-    {
-        size_t leadRowTileVertIndex = step / tileRows;
-        size_t inLeadRowTileVertOffset = step - leadRowTileVertIndex * tileRows;
-        
-        size_t tileHorizIndex = step / tileCols;
-        size_t inTileHorizOffset = step - tileHorizIndex * tileCols;
-
-        size_t leadRowTileIndex = leadRowTileVertIndex * tilesCountHoriz + tileHorizIndex;
-
-        Tile* leadTile = tiles[leadRowTileIndex];
-
-        float divisor = leadTile->tile[inTileHorizOffset * (leadTile->tileRows) + inLeadRowTileVertOffset];
-
-            //
-
-        size_t offset = step + 1;
-
-        size_t tileVertIndex = offset / tileRows;
-        size_t inTileVertOffset = offset - tileVertIndex * tileRows;
-
-            //
-
-        size_t index = tileVertIndex * tilesCountHoriz + tileHorizIndex;
-
-        Tile* curentTile = tiles[index];
-
-            // first tile
-
-        curentTile->scaleColumn(inTileVertOffset, inTileHorizOffset, divisor);
-
-            // next tiles in 'tile column'
-
-        index += tilesCountHoriz;
-
-        for(size_t i = tileVertIndex + 1; i < tilesCountVert; ++i, index += tilesCountHoriz)
-        {            
-            tiles[index]->scaleColumn(0, inTileHorizOffset, divisor);
-        }
-    }
-
-    /////////////////////////////////////////
-    void updateMain1(size_t step)
-    {
-        size_t leadColTileHorizIndex = step / tileCols;
-        size_t leadRowTileVertIndex = step / tileRows;
-
-        size_t inLeadColTileHorizOffset = step - leadColTileHorizIndex * tileCols;
-        size_t inLeadRowTileVertOffset = step - leadRowTileVertIndex * tileRows;
-
-            //
-
-        size_t offset = step + 1;
-
-        size_t tileHorizIndex = offset / tileCols;
-        size_t tileVertIndex = offset / tileRows;
-
-        size_t inTileHorizOffset = offset - tileHorizIndex * tileCols;
-        size_t inTileVertOffset = offset - tileVertIndex * tileRows;
-
-            //
-
-        size_t index = tileVertIndex * tilesCountHoriz + tileHorizIndex;
-
-        size_t leadColTileIndex = tileVertIndex * tilesCountHoriz + leadColTileHorizIndex;
-        size_t leadRowTileIndex = leadRowTileVertIndex * tilesCountHoriz + tileHorizIndex;
-
-        Tile* curentTile = tiles[index];
-
-        Tile* leadColTile = tiles[leadColTileIndex];
-        float* leadColBlock = leadColTile->tile + inLeadColTileHorizOffset * (leadColTile->tileRows);
-
-        Tile* leadRowTile = tiles[leadRowTileIndex];
-
-            // first tile
-
-        curentTile->updateMain(inTileVertOffset, inTileHorizOffset, leadRowTile, inLeadRowTileVertOffset, leadColBlock);
-
-            //
-
-        size_t bulkStartHoriz = tileHorizIndex + 1;
-        size_t bulkStartVert = tileVertIndex + 1;
-        
-            // next tiles in row
-
-        ++index;
-        ++leadRowTileIndex;
-
-        for(size_t i = bulkStartHoriz; i < tilesCountHoriz; ++i, ++index, ++leadRowTileIndex)
-        {
-            curentTile = tiles[index];
-            leadRowTile = tiles[leadRowTileIndex];
-
-            curentTile->updateMain(inTileVertOffset, 0, leadRowTile, inLeadRowTileVertOffset, leadColBlock);
-        }     
-
-            // next tiles in col
-
-        leadRowTileIndex = leadRowTileVertIndex * tilesCountHoriz + tileHorizIndex;
-        leadRowTile = tiles[leadRowTileIndex];
-        
-        index += tileHorizIndex;
-        
-        leadColTileIndex += tilesCountHoriz;
-
-        for(size_t i = bulkStartVert; i < tilesCountVert; ++i, index += tilesCountHoriz, leadColTileIndex += tilesCountHoriz) 
-        {
-            curentTile = tiles[index];
-
-            leadColTile = tiles[leadColTileIndex];
-            float* leadColBlock = leadColTile->tile + inLeadColTileHorizOffset * (leadColTile->tileRows);
-
-            curentTile->updateMain(0, inTileHorizOffset, leadRowTile, inLeadRowTileVertOffset, leadColBlock);
-        }   
-
-            // main tiles bulk
-                
-        leadColTileIndex = bulkStartVert * tilesCountHoriz + leadColTileHorizIndex;
-
-        for(size_t i = bulkStartVert; i < tilesCountVert; ++i, leadColTileIndex += tilesCountHoriz)
-        {            
-            leadColTile = tiles[leadColTileIndex];
-            float* leadColBlock = leadColTile->tile + inLeadColTileHorizOffset * (leadColTile->tileRows);
-            
-            leadRowTileIndex = leadRowTileVertIndex * tilesCountHoriz + bulkStartHoriz;
-
-            for(size_t j = bulkStartHoriz; j < tilesCountHoriz; ++j, ++leadRowTileIndex)
-            {                
-                leadRowTile = tiles[leadRowTileIndex];
-
-                index = i * tilesCountHoriz + j;
-                curentTile = tiles[index];
-                
-                curentTile->updateMain(0, 0, leadRowTile, inLeadRowTileVertOffset, leadColBlock);
-            }
-        }    
-    }
-
-    void updateMain(size_t step)
-    {
-        size_t leadColTileHorizIndex = step / tileCols;
-        size_t leadRowTileVertIndex = step / tileRows;
-
-        size_t inLeadColTileHorizOffset = step - leadColTileHorizIndex * tileCols;
-        size_t inLeadRowTileVertOffset = step - leadRowTileVertIndex * tileRows;
-
-            //
-
-        size_t offset = step + 1;
-
-        size_t tileHorizIndex = offset / tileCols;
-        size_t tileVertIndex = offset / tileRows;
-
-        size_t inTileHorizOffset = offset - tileHorizIndex * tileCols;
-        size_t inTileVertOffset = offset - tileVertIndex * tileRows;
-
-            //
-
-        size_t index = tileVertIndex * tilesCountHoriz + tileHorizIndex;
-
-        size_t leadColTileIndex = tileVertIndex * tilesCountHoriz + leadColTileHorizIndex;
-        size_t leadRowTileIndex = leadRowTileVertIndex * tilesCountHoriz + tileHorizIndex;
-
-        Tile* curentTile = tiles[index];
-
-        Tile* leadColTile = tiles[leadColTileIndex];
-        float* leadColBlock = leadColTile->tile + inLeadColTileHorizOffset * (leadColTile->tileRows);
-
-        Tile* leadRowTile = tiles[leadRowTileIndex];
-
-            // first tile
-
-        curentTile->updateMain(inTileVertOffset, inTileHorizOffset, leadRowTile, inLeadRowTileVertOffset, leadColBlock);
-
-            //
-
-        size_t bulkStartHoriz = tileHorizIndex + 1;
-        size_t bulkStartVert = tileVertIndex + 1;
-        
-            // next tiles in row
-
-        ++index;
-        ++leadRowTileIndex;
-
-        for(size_t i = bulkStartHoriz; i < tilesCountHoriz; ++i, ++index, ++leadRowTileIndex)
-        {
-            curentTile = tiles[index];
-            leadRowTile = tiles[leadRowTileIndex];
-
-            curentTile->updateMain(inTileVertOffset, 0, leadRowTile, inLeadRowTileVertOffset, leadColBlock);
-        }     
-
-            // next tiles in col
-
-        leadRowTileIndex = leadRowTileVertIndex * tilesCountHoriz + tileHorizIndex;
-        leadRowTile = tiles[leadRowTileIndex];
-        
-        index += tileHorizIndex;
-        
-        leadColTileIndex += tilesCountHoriz;
-
-        for(size_t i = bulkStartVert; i < tilesCountVert; ++i, index += tilesCountHoriz, leadColTileIndex += tilesCountHoriz) 
-        {
-            curentTile = tiles[index];
-
-            leadColTile = tiles[leadColTileIndex];
-            float* leadColBlock = leadColTile->tile + inLeadColTileHorizOffset * (leadColTile->tileRows);
-
-            curentTile->updateMain(0, inTileHorizOffset, leadRowTile, inLeadRowTileVertOffset, leadColBlock);
-        }   
-
-            // main tiles bulk
-        
-        class Apply
-        {
-            Tile** tiles;
-            size_t tilesCountHoriz; 
-            size_t leadColTileHorizIndex; 
-            size_t inLeadColTileHorizOffset; 
-            size_t inLeadRowTileVertOffset;
-            size_t leadRowTileVertIndex;
-            size_t bulkStartHoriz;                
-
-        public:
-
-            Apply
-            (
-                Tile** argTiles,
-                size_t argTilesCountHoriz, 
-                size_t argLeadColTileHorizIndex, 
-                size_t argInLeadColTileHorizOffset, 
-                size_t argInLeadRowTileVertOffset,
-                size_t argLeadRowTileVertIndex,
-                size_t argBulkStartHoriz                
-            )
-                :                    
-                tiles(argTiles),
-                tilesCountHoriz(argTilesCountHoriz),
-                leadColTileHorizIndex(argLeadColTileHorizIndex),
-                inLeadColTileHorizOffset(argInLeadColTileHorizOffset),
-                inLeadRowTileVertOffset(argInLeadRowTileVertOffset),
-                leadRowTileVertIndex(argLeadRowTileVertIndex),
-                bulkStartHoriz(argBulkStartHoriz)  
-            {}
-
-            void operator()(const blocked_range<size_t>& workItem) const
-            {
-                size_t startIndex = workItem.begin();
-                size_t stopIndex = workItem.end();
-
-                size_t leadColTileIndex = startIndex * tilesCountHoriz + leadColTileHorizIndex;
-
-                for(size_t i = startIndex; i < stopIndex; ++i, leadColTileIndex += tilesCountHoriz)
-                {                                
-                    Tile* leadColTile = tiles[leadColTileIndex];
-                    float* leadColBlock = leadColTile->tile + inLeadColTileHorizOffset * (leadColTile->tileRows);
-                    
-                    size_t leadRowTileIndex = leadRowTileVertIndex * tilesCountHoriz + bulkStartHoriz;
-
-                    for(size_t j = bulkStartHoriz; j < tilesCountHoriz; ++j, ++leadRowTileIndex)
-                    {                
-                        Tile* leadRowTile = tiles[leadRowTileIndex];
-
-                        size_t index = i * tilesCountHoriz + j;
-                        Tile* curentTile = tiles[index];
-                        
-                        curentTile->updateMain(0, 0, leadRowTile, inLeadRowTileVertOffset, leadColBlock);
-                    }
-                }    
-            }
-        };
-
-        parallel_for
-        (
-            blocked_range<size_t>(bulkStartVert, tilesCountVert), 
-            Apply
-            (
-                tiles, 
-                tilesCountHoriz, 
-                leadColTileHorizIndex, 
-                inLeadColTileHorizOffset, 
-                inLeadRowTileVertOffset, 
-                leadRowTileVertIndex, 
-                bulkStartHoriz
-            )
-        ); 
-    }
 
     /////////////////////////////////////////
     // debug
@@ -1217,6 +855,8 @@ struct Solver
     /////////////////////////////////////////
     bool Solve()
     {
+        //fp32TiledMatrix->printMatrix();   
+
             // to do: use tilesCount (square matrices)
 
         size_t diagCount = fp32TiledMatrix->tilesCountHoriz;
@@ -1224,9 +864,12 @@ struct Solver
         for(size_t step = 0; step < diagCount; ++step)
         {
             if(fp32TiledMatrix->factorizePanel(step, permutations))
-            {
-                // tri solve
-                // calc schur
+            {                
+                if(step < diagCount - 1)
+                {                    
+                    fp32TiledMatrix->triangleSolve(step);
+                    fp32TiledMatrix->updateTrailingSubmatrix(step);                
+                }
             }
             else
             {
@@ -1234,47 +877,7 @@ struct Solver
             }
         }
 
-        return true;
-    }
-
-    /////////////////////////////////////////
-    bool Solve1()
-    {   
-        //fp32TiledMatrix->printMatrix();     
-
-        for(size_t step = 0; step < dimension - 1; ++step)        
-        {                                    
-            int pivotIndex = fp32TiledMatrix->findPivot(step);            
-            
-            if(pivotIndex < 0)
-            {
-                return false;
-            }
-            
-            permutations[step] = pivotIndex;
-
-        //printf("{%d %d}\n", step, pivotIndex);
-
-            if(pivotIndex != step)
-            {
-                fp32TiledMatrix->swapRows(step, pivotIndex);                
-            }
-            
-            //if(step == 0)
-                //fp32TiledMatrix->printMatrix();     
-
-            fp32TiledMatrix->scaleColumn(step);                          
-
-            //if(step == 0)
-                //fp32TiledMatrix->printMatrix();     
-
-            fp32TiledMatrix->updateMain(step);            
-
-            //if(step == 0)
-                //fp32TiledMatrix->printMatrix();                 
-        }
-
-        permutations[dimension - 1] = dimension - 1;
+        //fp32TiledMatrix->printMatrix();
 
         fp32TiledMatrix->ExportToRowMajorFp64(fp64MatrixLup, expandedDimension);
 
