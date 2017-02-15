@@ -98,6 +98,7 @@ struct Tile
     ~Tile()
     {
         aligned_free(tile);
+        aligned_free(rowMajor);
     }
 
     /////////////////////////////////////////
