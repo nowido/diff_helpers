@@ -322,11 +322,11 @@ struct Tile
         
         for(size_t col = 0; col < tileCols; ++col, colData += topTileRows)        
         {       
-            for(size_t row = 0; row < tileRows; ++row, ++pDest)
+            float* rowData = left->rowMajor;
+
+            for(size_t row = 0; row < tileRows; ++row, ++pDest, rowData += leftTileCols)
             {                                
                 __m128 summa = _mm_setzero_ps();
-
-                float* rowData = left->rowMajor + row * leftTileCols;
 
                 for(size_t depth = 0; depth < topTileRows; depth += SSE_BASE_COUNT)
                 {
