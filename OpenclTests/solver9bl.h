@@ -319,20 +319,21 @@ struct Tile
         float* colData = top->tile;
 
         align_as(SSE_ALIGNMENT) float buf[SSE_BASE_COUNT];                
-        __m128* pSumValue = (__m128*)buf;
-
+        
         for(size_t col = 0; col < tileCols; ++col, colData += topTileRows)        
         {       
             for(size_t row = 0; row < tileRows; ++row, ++pDest)
             {                                
-                *pSumValue = _mm_setzero_ps();
+                __m128 summa = _mm_setzero_ps();
 
                 float* rowData = left->rowMajor + row * leftTileCols;
 
                 for(size_t depth = 0; depth < topTileRows; depth += SSE_BASE_COUNT)
                 {
-                    *pSumValue = _mm_add_ps(*pSumValue, _mm_mul_ps(_mm_load_ps(rowData + depth), _mm_load_ps(colData + depth)));
+                    summa = _mm_add_ps(summa, _mm_mul_ps(_mm_load_ps(rowData + depth), _mm_load_ps(colData + depth)));
                 }
+                
+                _mm_store_ps(buf, summa);
 
                 (*pDest) -= (buf[0] + buf[1] + buf[2] + buf[3]);
             }
