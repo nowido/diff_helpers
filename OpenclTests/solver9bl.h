@@ -102,7 +102,7 @@ struct Tile
     }
 
     /////////////////////////////////////////
-    void updateRowMajor()
+    void updateRowMajor1()
     {
         float* pSrc = tile;
 
@@ -115,6 +115,43 @@ struct Tile
                 *pDest = *pSrc;                
             }
         }        
+    }
+
+    /////////////////////////////////////////
+    void updateRowMajor()
+    {
+        float* pSrc = tile;
+        float* pDest = rowMajor;
+
+        if(tileCols == TILE_SIDE)
+        {            
+            for(size_t row = 0; row < tileRows; ++row, ++pSrc, pDest += tileCols)
+            {
+                for(size_t col = 0; col < tileCols; col += SSE_BASE_COUNT)
+                {
+                    align_as(SSE_ALIGNMENT) float rowData[SSE_BASE_COUNT];
+
+                    rowData[0] = pSrc[col * tileRows];
+                    rowData[1] = pSrc[(col + 1) * tileRows];
+                    rowData[2] = pSrc[(col + 2) * tileRows];
+                    rowData[3] = pSrc[(col + 3) * tileRows];
+
+                    _mm_store_ps(pDest + col, *(__m128*)rowData);
+                }    
+            }
+        }
+        else
+        {
+            for(size_t col = 0; col < tileCols; ++col)
+            {
+                float* pDest = rowMajor + col;
+
+                for(size_t row = 0; row < tileRows; ++row, ++pSrc, pDest += tileCols)
+                {
+                    *pDest = *pSrc;                
+                }
+            }        
+        }
     }
 
     /////////////////////////////////////////
@@ -185,14 +222,28 @@ struct Tile
     {
         float* pScan = tile + (tileCols - 1) * tileRows;
 
-        for(size_t row = 0; row < tileRows; ++row, ++pScan)
+        if(tileRows == TILE_SIDE)
         {
-            *pScan /= divisor;
-        }        
+            __m128 qdiv = _mm_load1_ps(&divisor);
+
+            for(size_t row = 0; row < tileRows; row += SSE_BASE_COUNT)
+            {   
+                float* p = pScan + row;             
+                
+                _mm_store_ps(p, _mm_div_ps(*(__m128*)p, qdiv));
+            }
+        }
+        else
+        {
+            for(size_t row = 0; row < tileRows; ++row, ++pScan)
+            {
+                *pScan /= divisor;
+            }        
+        }
     }
 
     /////////////////////////////////////////
-    int updateWithScaleAndNextPivotSearch(size_t offsetVert, size_t offsetHoriz, const float* leadRowBlock)
+    int updateWithScaleAndNextPivotSearch1(size_t offsetVert, size_t offsetHoriz, const float* leadRowBlock)
     {
         // assert
         // offsetHoriz > 1
@@ -250,6 +301,56 @@ struct Tile
                 column[i] -= leadCol[i] * ldRowValue;
             }   
         }    
+
+        return pivotIndex; 
+    }
+
+    /////////////////////////////////////////
+    int updateWithScaleAndNextPivotSearch(size_t offsetVert, size_t offsetHoriz, const float* leadRowBlock)
+    {
+        // assert
+        // offsetHoriz > 1
+        // offsetHoriz < tileCols
+
+        // leadRowBlock is continguous (extracted from col major into temporary buffer)
+
+            //
+
+        size_t leadColOffset = offsetHoriz - 1;
+
+        float* leadCol = tile + leadColOffset * tileRows;
+
+        float divisor = leadRowBlock[leadColOffset];
+
+        scaleColumn(offsetVert, leadCol, divisor);
+
+            // process leftmost col of update area, with next pivot search
+
+        int pivotIndex = -1;        
+        float maxValue = 0;
+
+        float* column = leadCol + tileRows;
+
+        float ldRowValue = leadRowBlock[offsetHoriz];
+
+        for(size_t i = offsetVert; i < tileRows; ++i)
+        {
+            float v = (column[i] -= leadCol[i] * ldRowValue);
+
+            float fav = fabs(v);
+
+            if(fav > maxValue)
+            {                
+                maxValue = fav;
+                pivotIndex = i;                
+            }            
+        }   
+                        
+            // process other cols of update area
+        
+        column += tileRows;
+
+        processColumns(column, offsetHoriz + 1, offsetVert, leadRowBlock, leadCol);
 
         return pivotIndex; 
     }
@@ -423,6 +524,89 @@ private:
 
         return sum;
     }     
+
+    /////////////////////////////////////////
+    inline void scaleColumn(size_t offsetVert, float* leadCol, float divisor)
+    {
+        if(tileRows == TILE_SIDE)
+        {
+            size_t extra = offsetVert % SSE_BASE_COUNT;
+            size_t runStart = offsetVert + (extra ? (SSE_BASE_COUNT - extra) : 0);
+            
+            size_t i = offsetVert;
+
+            for(; i < runStart; ++i)
+            {
+                leadCol[i] /= divisor;
+            }
+            
+            __m128 qdiv = _mm_load1_ps(&divisor);
+
+            for(; i < tileRows; i += SSE_BASE_COUNT)
+            {   
+                float* p = leadCol + i;             
+
+                _mm_store_ps(p, _mm_div_ps(*(__m128*)p, qdiv));
+            }
+        }
+        else
+        {
+            for(size_t i = offsetVert; i < tileRows; ++i)
+            {
+                leadCol[i] /= divisor;
+            }
+        }
+    }
+
+    /////////////////////////////////////////
+    inline void processColumns
+                (
+                    float* columnData, 
+                    size_t colStart, 
+                    size_t offsetVert, 
+                    const float* leadRowBlock, 
+                    const float* leadCol
+                )
+    {
+        if(tileRows == TILE_SIDE)
+        {
+            size_t extra = offsetVert % SSE_BASE_COUNT;
+            size_t runStart = offsetVert + (extra ? (SSE_BASE_COUNT - extra) : 0);
+                        
+            for(size_t j = colStart; j < tileCols; ++j, columnData += tileRows)
+            {
+                float ldRowValue = leadRowBlock[j];
+
+                size_t i = offsetVert;
+
+                for(; i < runStart; ++i)
+                {
+                    columnData[i] -= leadCol[i] * ldRowValue;
+                }
+
+                __m128 qLdRowValue = _mm_load1_ps(&ldRowValue);
+
+                for(; i < tileRows; i += SSE_BASE_COUNT)
+                {
+                    float* p = columnData + i;             
+                    
+                    _mm_store_ps(p, _mm_sub_ps(*(__m128*)p, _mm_mul_ps(*(__m128*)(leadCol + i), qLdRowValue)));
+                }   
+            }            
+        }
+        else
+        {
+            for(size_t j = colStart; j < tileCols; ++j, columnData += tileRows)
+            {
+                float ldRowValue = leadRowBlock[j];
+
+                for(size_t i = offsetVert; i < tileRows; ++i)
+                {
+                    columnData[i] -= leadCol[i] * ldRowValue;
+                }   
+            }            
+        }
+    }
 };
 
 //-------------------------------------------------------------
