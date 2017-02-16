@@ -308,7 +308,7 @@ struct Tile
     }
 
     /////////////////////////////////////////
-    void subtractProduct(const Tile* left, const Tile* top)
+    void subtractProduct2(const Tile* left, const Tile* top)
     {
         size_t leftTileRows = left->tileRows;
         size_t leftTileCols = left->tileCols;
@@ -339,6 +339,90 @@ struct Tile
             }
         }
     }    
+
+    /////////////////////////////////////////
+    void subtractProduct(const Tile* left, const Tile* top)
+    {
+        size_t leftTileRows = left->tileRows;
+        size_t leftTileCols = left->tileCols;
+        size_t topTileRows = top->tileRows;
+
+        size_t innerBlocksCount = topTileRows / SSE_BASE_COUNT;
+
+        float* pDest = tile;
+
+        float* colData = top->tile;
+
+        align_as(SSE_ALIGNMENT) float buf[SSE_BASE_COUNT];                
+        
+        if(tileRows == TILE_SIDE)
+        {
+            align_as(SSE_ALIGNMENT) float blockOfSums[SSE_BASE_COUNT];  
+            
+            for(size_t col = 0; col < tileCols; ++col, colData += topTileRows)        
+            {       
+                float* rowData = left->rowMajor;
+                
+                for(size_t row = 0; row < tileRows; row += SSE_BASE_COUNT, pDest += SSE_BASE_COUNT)
+                {                        
+                    blockOfSums[0] = dotProduct(rowData, colData, innerBlocksCount);
+                    rowData += leftTileCols;
+
+                    blockOfSums[1] = dotProduct(rowData, colData, innerBlocksCount);                    
+                    rowData += leftTileCols;
+
+                    blockOfSums[2] = dotProduct(rowData, colData, innerBlocksCount);
+                    rowData += leftTileCols;
+
+                    blockOfSums[3] = dotProduct(rowData, colData, innerBlocksCount);                    
+                    rowData += leftTileCols;
+                                                         
+                    _mm_store_ps(pDest, _mm_sub_ps(*(__m128*)pDest, *(__m128*)blockOfSums));                    
+                }
+            }
+        }
+        else
+        {        
+            for(size_t col = 0; col < tileCols; ++col, colData += topTileRows)        
+            {       
+                float* rowData = left->rowMajor;
+
+                for(size_t row = 0; row < tileRows; ++row, ++pDest, rowData += leftTileCols)
+                {                     
+                    (*pDest) -= dotProduct(rowData, colData, innerBlocksCount);
+                }                
+            }
+        }
+    }       
+
+private:
+
+    /////////////////////////////////////////
+    inline float dotProduct(const float* rowData, const float* colData, size_t blocksCount)
+    {
+        const __m128* blockRowData = (const __m128 *)rowData;
+        const __m128* blockColData = (const __m128 *)colData;
+        
+        __m128 summa = _mm_set_ps1(0);
+
+        __m128 t;
+
+        for(size_t i = 0; i < blocksCount; ++i)
+        {
+            t = _mm_mul_ps(blockRowData[i], blockColData[i]);
+            summa = _mm_add_ps(summa, t);
+        }
+
+        t = _mm_movehl_ps(t, summa);            // t = s3, s2, s3, s2
+        summa = _mm_add_ps(summa, t);           // s = U, U, s3 + s1, s2 + s0
+        t = _mm_shuffle_ps(summa, summa, 1);    // t = U, U, U, s3 + s1 
+        summa = _mm_add_ss(summa, t);           // s = U, U, U, s3 + s1 + s2 + s0
+        
+        float sum;
+        _mm_store_ss(&sum, summa);
+
+        return sum;
+    }     
 };
 
 //-------------------------------------------------------------
