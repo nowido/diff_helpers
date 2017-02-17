@@ -478,7 +478,7 @@ struct Tile
                     blockOfSums[3] = dotProduct(rowData, colData, innerBlocksCount);                    
                     rowData += leftTileCols;
                                                          
-                    _mm_store_ps(pDest, _mm_sub_ps(*(__m128*)pDest, *(__m128*)blockOfSums));                    
+                    _mm_store_ps(pDest, _mm_sub_ps(*(__m128*)pDest, *(__m128*)blockOfSums));                                        
                 }
             }
         }
