@@ -30,8 +30,11 @@ void* aligned_alloc(size_t alignment, size_t size)
 #endif
 
 #define CACHE_LINE 64
+
 #define SSE_ALIGNMENT 16
 #define SSE_BASE_COUNT 4
 
-#endif
+#define AVX_ALIGNMENT 32 
+#define AVX_BASE_COUNT 8
 
+#endif
