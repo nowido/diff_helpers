@@ -816,7 +816,7 @@ struct TiledMatrix
     }        
 
     /////////////////////////////////////////
-    bool factorizePanel(size_t panelDiagIndex, int* permutations)
+    bool factorizePanel1(size_t panelDiagIndex, int* permutations)
     {           
         size_t topTileIndex = panelDiagIndex * tilesCountHoriz + panelDiagIndex;
 
@@ -893,6 +893,250 @@ struct TiledMatrix
                     }
                 }                    
             }
+
+            if(pivotIndex < 0)
+            {
+                return false;
+            }
+
+            permutations[matrixRow] = pivotIndex;
+
+            if(pivotIndex != matrixRow)
+            {
+                swapRows(matrixRow, pivotIndex);
+            }
+        }
+            
+            // scale rightmost col
+        
+        currentTile = tiles[topTileIndex];
+
+        float divisor = currentTile->tile[(currentTile->tileCols * currentTile->tileRows) - 1];
+
+        for(size_t i = panelDiagIndex + 1, index = topTileIndex + tilesCountHoriz; i < tilesCountVert; ++i, index += tilesCountHoriz)
+        {
+            tiles[index]->scaleRightmost(divisor);
+        }
+
+            //
+
+        return true;
+    }
+
+    /////////////////////////////////////////
+    bool factorizePanel(size_t panelDiagIndex, int* permutations)
+    {           
+        size_t topTileIndex = panelDiagIndex * tilesCountHoriz + panelDiagIndex;
+
+        size_t diagSteps = tiles[topTileIndex]->tileCols;
+
+            // find pivot in leftmost col
+
+        class ReduceLeftmostPivot
+        {
+            Tile** tiles;
+            size_t panelDiagIndex;
+            size_t tilesCountHoriz;
+
+        public:
+
+            float pivotValue;
+            int pivotIndex;
+
+            ReduceLeftmostPivot
+                (
+                    Tile** argTiles, 
+                    size_t argPanelDiagIndex, 
+                    size_t argTilesCountHoriz
+                ) : 
+                tiles(argTiles),
+                panelDiagIndex(argPanelDiagIndex),
+                tilesCountHoriz(argTilesCountHoriz),
+                pivotValue(0),
+                pivotIndex(-1)
+            {}
+
+            ReduceLeftmostPivot(ReduceLeftmostPivot& x, split) : 
+                tiles(x.tiles),
+                panelDiagIndex(x.panelDiagIndex),
+                tilesCountHoriz(x.tilesCountHoriz),
+                pivotValue(0),
+                pivotIndex(-1)
+            {}
+            
+            inline void operator()(const blocked_range<size_t>& workItem)
+            {
+                float pv = pivotValue;
+                int pi = pivotIndex;
+                
+                size_t start = workItem.begin();
+                size_t stop = workItem.end();
+
+                size_t index = start * tilesCountHoriz + panelDiagIndex;
+
+                for(size_t i = start; i != stop; ++i, index += tilesCountHoriz)
+                {
+                    Tile* currentTile = tiles[index];
+
+                    int localPivotIndex = currentTile->findPivotLeftmost(); 
+
+                    if(localPivotIndex > -1)
+                    {
+                        float fav = fabs(currentTile->tile[localPivotIndex]);
+
+                        if(fav > pv)
+                        {
+                            pv = fav;
+                            pi = i * tileRows + localPivotIndex;
+                        }
+                    }
+                }    
+
+                pivotValue = pv;
+                pivotIndex = pi;                            
+            }
+
+            void join(const ReduceLeftmostPivot& x)
+            {
+                if(x.pivotValue > pivotValue)
+                {
+                    pivotValue = x.pivotValue;
+                    pivotIndex = x.pivotIndex; 
+                }
+            }
+        };
+
+        int pivotIndex = -1;
+        float pivotValue = 0;
+
+        Tile* currentTile;
+
+        ReduceLeftmostPivot rlmp(tiles, panelDiagIndex, tilesCountHoriz);
+
+        parallel_reduce(blocked_range<size_t>(panelDiagIndex, tilesCountVert), rlmp);
+
+        pivotIndex = rlmp.pivotIndex;
+        pivotValue = rlmp.pivotValue;
+
+        if(pivotIndex < 0)
+        {
+            return false;            
+        }
+
+            //
+
+        size_t topRowIndex = panelDiagIndex * tileRows;
+
+        permutations[topRowIndex] = pivotIndex;
+
+        if(pivotIndex != topRowIndex)
+        {
+            swapRows(topRowIndex, pivotIndex);
+        }
+
+            // go on diagonal of top tile
+
+        for(size_t diag = 1, matrixRow = topRowIndex + 1; diag < diagSteps; ++diag, ++matrixRow)
+        {
+            currentTile = tiles[topTileIndex];
+
+            currentTile->ExtractRow(diag - 1, leadRowBlock);
+
+            // update all tiles in 'tile column'
+
+                // search next pivot while updating
+    
+            class ReduceNextPivotAndUpdate
+            {
+                size_t diag;
+                Tile** tiles;
+                size_t panelDiagIndex;
+                size_t tilesCountHoriz;
+                const float* leadRowBlock;
+
+            public:
+
+                float pivotValue;
+                int pivotIndex;
+
+                ReduceNextPivotAndUpdate
+                    (
+                        size_t argDiag,
+                        Tile** argTiles, 
+                        size_t argPanelDiagIndex, 
+                        size_t argTilesCountHoriz,
+                        const float* argLeadRowBlock                    
+                    ) :
+                    diag(argDiag),
+                    tiles(argTiles),
+                    panelDiagIndex(argPanelDiagIndex),
+                    tilesCountHoriz(argTilesCountHoriz),
+                    leadRowBlock(argLeadRowBlock),
+                    pivotValue(0),
+                    pivotIndex(-1)
+                {}
+
+                ReduceNextPivotAndUpdate(ReduceNextPivotAndUpdate& x, split) : 
+                    diag(x.diag),
+                    tiles(x.tiles),
+                    panelDiagIndex(x.panelDiagIndex),
+                    tilesCountHoriz(x.tilesCountHoriz),
+                    leadRowBlock(x.leadRowBlock),
+                    pivotValue(0),
+                    pivotIndex(-1)
+                {}
+                
+                inline void operator()(const blocked_range<size_t>& workItem)
+                {
+                    float pv = pivotValue;
+                    int pi = pivotIndex;
+                    
+                    size_t start = workItem.begin();
+                    size_t stop = workItem.end();
+
+                    size_t index = start * tilesCountHoriz + panelDiagIndex;
+
+                    for(size_t i = start; i != stop; ++i, index += tilesCountHoriz)
+                    {
+                        Tile* currentTile = tiles[index];
+
+                        int localPivotIndex = currentTile->updateWithScaleAndNextPivotSearch(((i > panelDiagIndex) ? 0 : diag), diag, leadRowBlock);
+
+                        if(localPivotIndex > -1)
+                        {
+                            float fav = fabs(currentTile->tile[diag * (currentTile->tileRows) + localPivotIndex]);
+
+                            if(fav > pv)
+                            {
+                                pv = fav;
+                                pi = i * tileRows + localPivotIndex;
+                            }
+                        }
+                    }    
+
+                    pivotValue = pv;
+                    pivotIndex = pi;                            
+                }
+
+                void join(const ReduceNextPivotAndUpdate& x)
+                {
+                    if(x.pivotValue > pivotValue)
+                    {
+                        pivotValue = x.pivotValue;
+                        pivotIndex = x.pivotIndex; 
+                    }
+                }                
+            };
+
+            pivotIndex = -1;
+            pivotValue = 0;
+
+            ReduceNextPivotAndUpdate rnpau(diag, tiles, panelDiagIndex, tilesCountHoriz, leadRowBlock);
+
+            parallel_reduce(blocked_range<size_t>(panelDiagIndex, tilesCountVert), rnpau);
+
+            pivotIndex = rnpau.pivotIndex;
+            pivotValue = rnpau.pivotValue;
 
             if(pivotIndex < 0)
             {
