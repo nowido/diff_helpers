@@ -380,7 +380,7 @@ private:
         const __m256* blockRowData = (const __m256 *)rowData;
         const __m256* blockColData = (const __m256 *)colData;
         
-        align_as(AVX_ALIGNMENT) float buf[AVX_ALIGNMENT];
+        align_as(AVX_ALIGNMENT) float buf[AVX_BASE_COUNT];
 
         __m256 summa = _mm256_set1_ps(0);
 
@@ -394,7 +394,16 @@ private:
 
         _mm256_store_ps(buf, summa);
 
-        return buf[0] + buf[1] + buf[2] + buf[3] + buf[4] + buf[5] + buf[6] + buf[7];
+        //*
+        float s = 0;
+
+        for(size_t i = 0; i < AVX_BASE_COUNT; ++i)
+        {
+            s += buf[i];    
+        }
+        //*/
+        //return buf[0] + buf[1] + buf[2] + buf[3] + buf[4] + buf[5] + buf[6] + buf[7];
+        return s;
     }     
 
     /////////////////////////////////////////
