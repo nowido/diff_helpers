@@ -1157,11 +1157,55 @@ struct TiledMatrix
 
         float divisor = currentTile->tile[(currentTile->tileCols * currentTile->tileRows) - 1];
 
+        //*
+        class ApplyScaleRightmost
+        {
+            Tile** tiles;
+            size_t panelDiagIndex;
+            size_t tilesCountHoriz;
+            float divisor;
+
+        public:
+
+            ApplyScaleRightmost
+                (
+                    Tile** argTiles,
+                    size_t argPanelDiagIndex,
+                    size_t argTilesCountHoriz,
+                    float argDivisor
+                ) : 
+                tiles(argTiles),
+                panelDiagIndex(argPanelDiagIndex),
+                tilesCountHoriz(argTilesCountHoriz),
+                divisor(argDivisor)
+            {}
+
+            inline void operator()(const blocked_range<size_t>& workItem) const
+            {
+                size_t start = workItem.begin();
+                size_t stop = workItem.end();
+
+                size_t index = start * tilesCountHoriz + panelDiagIndex;
+
+                for(size_t i = start; i < stop; ++i, index += tilesCountHoriz)
+                {
+                    tiles[index]->scaleRightmost(divisor);
+                }                        
+            }
+        };
+        
+        parallel_for
+        (
+            blocked_range<size_t>(panelDiagIndex + 1, tilesCountVert), 
+            ApplyScaleRightmost(tiles, panelDiagIndex, tilesCountHoriz, divisor)
+        ); 
+        //*/
+        /*
         for(size_t i = panelDiagIndex + 1, index = topTileIndex + tilesCountHoriz; i < tilesCountVert; ++i, index += tilesCountHoriz)
         {
             tiles[index]->scaleRightmost(divisor);
         }
-
+        */
             //
 
         return true;
@@ -1206,7 +1250,7 @@ struct TiledMatrix
                 tiles(argTiles)
             {}    
 
-            void operator()(const blocked_range<size_t>& workItem) const
+            inline void operator()(const blocked_range<size_t>& workItem) const
             {
                 size_t start = workItem.begin();
                 size_t stop = workItem.end();
@@ -1269,7 +1313,7 @@ struct TiledMatrix
                 tiles(argTiles)
             {}    
 
-            void operator()(const blocked_range<size_t>& workItem) const
+            inline void operator()(const blocked_range<size_t>& workItem) const
             {
                 size_t start = workItem.begin();
                 size_t stop = workItem.end();
@@ -1361,7 +1405,7 @@ struct TiledMatrix
                     inTileR2(argInTileR2)                                        
                 {}
 
-                void operator()(const blocked_range<size_t>& workItem) const
+                inline void operator()(const blocked_range<size_t>& workItem) const
                 {
                     size_t start = workItem.begin();
                     size_t stop = workItem.end();
@@ -1407,7 +1451,7 @@ struct TiledMatrix
                     inTileR2(argInTileR2)                                        
                 {}
 
-                void operator()(const blocked_range<size_t>& workItem) const
+                inline void operator()(const blocked_range<size_t>& workItem) const
                 {
                     size_t start = workItem.begin();
                     size_t stop = workItem.end();
