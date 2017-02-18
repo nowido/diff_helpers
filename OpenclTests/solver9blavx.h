@@ -1,10 +1,12 @@
-#ifndef SOLVER9BL_H
-#define SOLVER9BL_H
+#ifndef SOLVER9BLAVX_H
+#define SOLVER9BLAVX_H
 
 #include <tbb/tbb.h>
 
 #include <math.h>
-#include <xmmintrin.h>
+//#include <xmmintrin.h>
+
+#include <immintrin.h>
 
 #include "memalign.h"
 
@@ -154,7 +156,7 @@ struct Tile
     }
 
     /////////////////////////////////////////
-    void ExtractTriangle(float* dest)
+    void ExtractTriangle1(float* dest)
     {        
         float* pDest = dest;
 
@@ -166,6 +168,27 @@ struct Tile
             {
                 *pDest = *pSrc;
             }            
+        }
+    }
+
+    /////////////////////////////////////////
+    void ExtractTriangle(float* dest)
+    {        
+        float* pDest = dest;
+
+        for(size_t row = 1; row < tileRows; ++row)        
+        {
+            float* pSrc = tile + row; 
+
+            for(size_t col = 0; col < row; ++col, pSrc += tileRows)    
+            {
+                pDest[col] = *pSrc;
+            }            
+
+            size_t r = row % AVX_BASE_COUNT;
+            size_t stride = row + (r ? (AVX_BASE_COUNT - r) : 0);
+
+            pDest += stride;
         }
     }
 
@@ -281,7 +304,7 @@ struct Tile
     }
 
     /////////////////////////////////////////
-    void solveTriangle(const float* triangleBlock)
+    void solveTriangle1(const float* triangleBlock)
     {   
         float* column = tile;
 
@@ -301,6 +324,27 @@ struct Tile
                 }
 
                 (*inTile) -= s;
+            }
+        }    
+    }
+
+    /////////////////////////////////////////
+    void solveTriangle(const float* triangleBlock)
+    {   
+        float* column = tile;
+
+        for(size_t col = 0; col < tileCols; ++col, column += tileRows)
+        {            
+            const float* pTriScan = triangleBlock;
+            
+            for(size_t row = 1; row < tileRows; ++row)
+            {
+                column[row] -= dotProductEl(pTriScan, column, row);
+                
+                size_t r = row % AVX_BASE_COUNT;
+                size_t stride = row + (r ? (AVX_BASE_COUNT - r) : 0);
+                
+                pTriScan += stride;
             }
         }    
     }
@@ -375,6 +419,36 @@ struct Tile
 private:
 
     /////////////////////////////////////////
+    inline float dotProductEl(const float* rowData, const float* colData, size_t elementsCount)
+    {
+        size_t runStop = elementsCount / AVX_BASE_COUNT;
+        runStop *= AVX_BASE_COUNT;
+
+        align_as(AVX_ALIGNMENT) float buf[AVX_BASE_COUNT];
+
+        __m256 summa = _mm256_set1_ps(0);
+
+        size_t i = 0;
+        
+        for(; i < runStop; i += AVX_BASE_COUNT)
+        {            
+            __m256 vr = *(__m256*)(rowData + i);
+            __m256 vc = *(__m256*)(colData + i);
+            __m256 t = _mm256_mul_ps(vr, vc);
+            summa = _mm256_add_ps(summa, t);
+        }
+
+        _mm256_store_ps(buf, summa);
+
+        for(; i < elementsCount; ++i)
+        {
+            *buf += rowData[i] * colData[i];
+        }
+
+        return buf[0] + buf[1] + buf[2] + buf[3] + buf[4] + buf[5] + buf[6] + buf[7];
+    }
+
+    /////////////////////////////////////////
     inline float dotProduct(const float* rowData, const float* colData, size_t blocksCount)
     {
         const __m256* blockRowData = (const __m256 *)rowData;
@@ -394,16 +468,16 @@ private:
 
         _mm256_store_ps(buf, summa);
 
-        //*
+        /*
         float s = 0;
 
         for(size_t i = 0; i < AVX_BASE_COUNT; ++i)
         {
             s += buf[i];    
         }
-        //*/
-        //return buf[0] + buf[1] + buf[2] + buf[3] + buf[4] + buf[5] + buf[6] + buf[7];
-        return s;
+        */
+        return buf[0] + buf[1] + buf[2] + buf[3] + buf[4] + buf[5] + buf[6] + buf[7];
+        //return s;
     }     
 
     /////////////////////////////////////////
@@ -558,7 +632,19 @@ struct TiledMatrix
 
         leadRowBlock = (float*)aligned_alloc(CACHE_LINE, tileCols * sizeof(float));
 
-        size_t triangleSize = (tileRows * tileCols - tileCols) / 2;
+            // to do calc precise tri block with AVX rows stuff
+            // without this ugly cycle
+
+        size_t triangleSize = 0;
+
+        for(size_t row = 1; row < tileRows; ++row)        
+        {
+            size_t r = row % AVX_BASE_COUNT;
+            size_t stride = row + (r ? (AVX_BASE_COUNT - r) : 0);
+
+            triangleSize += stride;
+        }
+            //
 
         triangleBlock = (float*)aligned_alloc(CACHE_LINE, triangleSize * sizeof(float));
     }   
