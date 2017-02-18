@@ -341,6 +341,29 @@ private:
             }            
         }
     }
+
+    inline void processColumns1
+            (
+                float* columnData, 
+                size_t colStart, 
+                size_t offsetVert, 
+                const float* leadRowBlock, 
+                const float* leadCol
+            )
+    {
+        size_t height = tileRows - offsetVert;
+
+        const float* x = leadCol + offsetVert;
+
+        float* y = columnData + offsetVert;
+
+        for(size_t j = colStart; j < tileCols; ++j, y += tileRows)
+        {            
+            // y = -leadRowElement * x + y
+
+            cblas_saxpy((MKL_INT)height, -leadRowBlock[j], x, 1, y, 1);
+        }            
+    }    
 };
 
 //-------------------------------------------------------------
