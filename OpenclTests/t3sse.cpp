@@ -6,7 +6,9 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#include "solver9bl.h"
+//#include "solver9blavx.h"
+#include "solver9blasavx.h"
+//#include "solver9blas.h"
 
 //-------------------------------------------------------------
 
