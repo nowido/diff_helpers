@@ -885,6 +885,17 @@ struct TiledMatrix
     }
 
     /////////////////////////////////////////
+    void triangleSolve1(size_t panelDiagIndex)
+    {   
+        Tile* triTile = tiles[panelDiagIndex * tilesCountHoriz + panelDiagIndex];
+
+        for(size_t i = panelDiagIndex + 1, index = panelDiagIndex * tilesCountHoriz + panelDiagIndex + 1; i < tilesCountHoriz; ++i, ++index)
+        {                    
+            tiles[index]->solveTriangle(triTile);
+        }        
+    }
+
+    /////////////////////////////////////////
     void updateTrailingSubmatrix(size_t panelDiagIndex)
     {
         size_t offset = panelDiagIndex + 1;
@@ -936,6 +947,26 @@ struct TiledMatrix
             blocked_range<size_t>(offset, tilesCountVert), 
             Apply(panelDiagIndex, tilesCountHoriz, tiles)
         ); 
+    }
+
+    /////////////////////////////////////////
+    void updateTrailingSubmatrix1(size_t panelDiagIndex)
+    {
+        size_t offset = panelDiagIndex + 1;
+        
+        size_t rowScanIndex = offset * tilesCountHoriz;
+
+        size_t topStart = panelDiagIndex * tilesCountHoriz;
+
+        for(size_t i = offset; i < tilesCountVert; ++i, rowScanIndex += tilesCountHoriz)
+        {
+            Tile* left = tiles[rowScanIndex + panelDiagIndex];
+
+            for(size_t j = offset; j < tilesCountHoriz; ++j)
+            {                
+                tiles[rowScanIndex + j]->subtractProduct(left, tiles[topStart + j]);
+            }
+        }        
     }
 
     /////////////////////////////////////////
