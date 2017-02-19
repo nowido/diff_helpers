@@ -1345,10 +1345,43 @@ struct Solver
         return s;          
     }
 
+    /////////////////////////////////////////
+    double CalcResiduals1()
+    {
+        memcpy(residuals, fp64Vector, fp64VectorSize);
+
+        cblas_dgemv 
+        (
+            CblasRowMajor, 
+            CblasNoTrans, 
+            dimension, 
+            dimension, 
+            -1, 
+            fp64Matrix, 
+            (MKL_INT)expandedDimension, 
+            solution, 
+            1, 
+            1, 
+            residuals, 
+            1
+        );
+
+        double s = 0;
+
+        for(size_t i = 0; i < dimension; ++i)
+        {
+            double e = residuals[i];
+
+            s += e * e;
+        }
+
+        return s;          
+    }
+
 private:
 
     /////////////////////////////////////////
-    void useLupToSolve(double* x, double* b)
+    void useLupToSolve1(double* x, double* b)
     {        
         memcpy(x, b, fp64VectorSize);
 
@@ -1403,6 +1436,77 @@ private:
             x[row] /= de;        
         }
     }
+
+    /////////////////////////////////////////
+    void useLupToSolve(double* x, double* b)
+    {        
+        memcpy(x, b, fp64VectorSize);
+
+            // permute right-hand part
+        
+        size_t lastIndex = dimension - 1;
+
+        for(size_t step = 0; step < lastIndex; ++step)
+        {
+            int permutationIndex = permutations[step];
+            
+            if(permutationIndex != step)
+            {
+                double v = x[step];
+                x[step] = x[permutationIndex];
+                x[permutationIndex] = v;
+            }
+        }
+
+            // Ly = Pb (in place)
+
+        double* pScanRow = fp64MatrixLup + expandedDimension;
+
+        for(size_t row = 1; row < dimension; ++row, pScanRow += expandedDimension)
+        {            
+            double s = 0;
+
+            for(int col = 0; col < row; ++col)
+            {
+                s += pScanRow[col] * x[col];
+            }
+
+            x[row] -= s;
+        }
+
+        /*
+        cblas_dtrsm 
+        (
+            CblasRowMajor, 
+            CblasLeft, 
+            CblasLower, 
+            CblasNoTrans, 
+            CblasUnit, 
+            (MKL_INT)dimension, 
+            1, 
+            1, 
+            fp64MatrixLup, 
+            (MKL_INT)dimension, 
+            x, 
+            1
+        );
+        */
+        cblas_dtrsm 
+        (
+            CblasRowMajor, 
+            CblasLeft, 
+            CblasUpper, 
+            CblasNoTrans, 
+            CblasNonUnit, 
+            (MKL_INT)dimension, 
+            1, 
+            1, 
+            fp64MatrixLup, 
+            (MKL_INT)dimension, 
+            x, 
+            1
+        );
+    }    
 };
 
 //-------------------------------------------------------------
