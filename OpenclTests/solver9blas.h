@@ -1483,7 +1483,7 @@ private:
             1, 
             1, 
             fp64MatrixLup, 
-            (MKL_INT)dimension, 
+            (MKL_INT)expandedDimension, 
             x, 
             1
         );
@@ -1501,7 +1501,7 @@ private:
             1, 
             1, 
             fp64MatrixLup, 
-            (MKL_INT)dimension, 
+            (MKL_INT)expandedDimension, 
             x, 
             1
         );
