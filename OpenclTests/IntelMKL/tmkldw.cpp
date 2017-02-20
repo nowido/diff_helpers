@@ -88,7 +88,7 @@ double calcResiduals(size_t dim, double* m, double* x, double* b, double* r)
 
 int main()
 {
-    const int alignment = 32;
+    const int alignment = 64;
 
     const size_t dim = 4000;    
 
