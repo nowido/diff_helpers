@@ -109,7 +109,7 @@ void expandMatrix(size_t dim, float* fp32m, double* fp64m)
 
 int main()
 {
-    const int alignment = 32;
+    const int alignment = 64;
 
     const size_t dim = 4000;    
 
