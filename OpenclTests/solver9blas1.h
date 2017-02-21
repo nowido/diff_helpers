@@ -9,7 +9,7 @@
 
 #include "memalign.h"
 
-#define TILE_SIDE 4
+#define TILE_SIDE 128
 
 //-------------------------------------------------------------
 
@@ -725,285 +725,6 @@ struct TiledMatrix
     }        
 
     /////////////////////////////////////////
-    bool factorizePanel1(size_t panelDiagIndex, int* permutations)
-    {           
-        size_t topTileIndex = panelDiagIndex * tilesCountHoriz + panelDiagIndex;
-
-        size_t diagSteps = tiles[topTileIndex]->tileCols;
-
-            // find pivot in leftmost col
-
-        class ReduceLeftmostPivot
-        {
-            Tile** tiles;
-            size_t panelDiagIndex;
-            size_t tilesCountHoriz;
-
-        public:
-
-            float pivotValue;
-            int pivotIndex;
-
-            ReduceLeftmostPivot
-                (
-                    Tile** argTiles, 
-                    size_t argPanelDiagIndex, 
-                    size_t argTilesCountHoriz
-                ) : 
-                tiles(argTiles),
-                panelDiagIndex(argPanelDiagIndex),
-                tilesCountHoriz(argTilesCountHoriz),
-                pivotValue(0),
-                pivotIndex(-1)
-            {}
-
-            ReduceLeftmostPivot(ReduceLeftmostPivot& x, split) : 
-                tiles(x.tiles),
-                panelDiagIndex(x.panelDiagIndex),
-                tilesCountHoriz(x.tilesCountHoriz),
-                pivotValue(0),
-                pivotIndex(-1)
-            {}
-            
-            inline void operator()(const blocked_range<size_t>& workItem)
-            {
-                float pv = pivotValue;
-                int pi = pivotIndex;
-                
-                size_t start = workItem.begin();
-                size_t stop = workItem.end();
-
-                size_t index = start * tilesCountHoriz + panelDiagIndex;
-
-                for(size_t i = start; i != stop; ++i, index += tilesCountHoriz)
-                {
-                    Tile* currentTile = tiles[index];
-
-                    int localPivotIndex = currentTile->findPivotLeftmost(); 
-
-                    if(localPivotIndex > -1)
-                    {
-                        float fav = fabs(currentTile->tile[localPivotIndex]);
-
-                        if(fav > pv)
-                        {
-                            pv = fav;
-                            pi = i * tileRows + localPivotIndex;
-                        }
-                    }
-                }    
-
-                pivotValue = pv;
-                pivotIndex = pi;                            
-            }
-
-            void join(const ReduceLeftmostPivot& x)
-            {
-                if(x.pivotValue > pivotValue)
-                {
-                    pivotValue = x.pivotValue;
-                    pivotIndex = x.pivotIndex; 
-                }
-            }
-        };
-
-        int pivotIndex = -1;
-        float pivotValue = 0;
-
-        Tile* currentTile;
-
-        ReduceLeftmostPivot rlmp(tiles, panelDiagIndex, tilesCountHoriz);
-
-        parallel_reduce(blocked_range<size_t>(panelDiagIndex, tilesCountVert), rlmp);
-
-        pivotIndex = rlmp.pivotIndex;
-        pivotValue = rlmp.pivotValue;
-
-        if(pivotIndex < 0)
-        {
-            return false;            
-        }
-
-            //
-
-        size_t topRowIndex = panelDiagIndex * tileRows;
-
-        permutations[topRowIndex] = pivotIndex;
-
-        if(pivotIndex != topRowIndex)
-        {
-            swapRows(topRowIndex, pivotIndex);
-        }
-
-            // go on diagonal of top tile
-
-        for(size_t diag = 1, matrixRow = topRowIndex + 1; diag < diagSteps; ++diag, ++matrixRow)
-        {
-            currentTile = tiles[topTileIndex];
-
-            currentTile->ExtractRow(diag - 1, leadRowBlock);
-
-            // update all tiles in 'tile column'
-
-                // search next pivot while updating
-    
-            class ReduceNextPivotAndUpdate
-            {
-                size_t diag;
-                Tile** tiles;
-                size_t panelDiagIndex;
-                size_t tilesCountHoriz;
-                const float* leadRowBlock;
-
-            public:
-
-                float pivotValue;
-                int pivotIndex;
-
-                ReduceNextPivotAndUpdate
-                    (
-                        size_t argDiag,
-                        Tile** argTiles, 
-                        size_t argPanelDiagIndex, 
-                        size_t argTilesCountHoriz,
-                        const float* argLeadRowBlock                    
-                    ) :
-                    diag(argDiag),
-                    tiles(argTiles),
-                    panelDiagIndex(argPanelDiagIndex),
-                    tilesCountHoriz(argTilesCountHoriz),
-                    leadRowBlock(argLeadRowBlock),
-                    pivotValue(0),
-                    pivotIndex(-1)
-                {}
-
-                ReduceNextPivotAndUpdate(ReduceNextPivotAndUpdate& x, split) : 
-                    diag(x.diag),
-                    tiles(x.tiles),
-                    panelDiagIndex(x.panelDiagIndex),
-                    tilesCountHoriz(x.tilesCountHoriz),
-                    leadRowBlock(x.leadRowBlock),
-                    pivotValue(0),
-                    pivotIndex(-1)
-                {}
-                
-                inline void operator()(const blocked_range<size_t>& workItem)
-                {
-                    float pv = pivotValue;
-                    int pi = pivotIndex;
-                    
-                    size_t start = workItem.begin();
-                    size_t stop = workItem.end();
-
-                    size_t index = start * tilesCountHoriz + panelDiagIndex;
-
-                    for(size_t i = start; i != stop; ++i, index += tilesCountHoriz)
-                    {
-                        Tile* currentTile = tiles[index];
-
-                        int localPivotIndex = currentTile->updateWithScaleAndNextPivotSearch(((i > panelDiagIndex) ? 0 : diag), diag, leadRowBlock);
-
-                        if(localPivotIndex > -1)
-                        {
-                            float fav = fabs(currentTile->tile[diag * (currentTile->tileRows) + localPivotIndex]);
-
-                            if(fav > pv)
-                            {
-                                pv = fav;
-                                pi = i * tileRows + localPivotIndex;
-                            }
-                        }
-                    }    
-
-                    pivotValue = pv;
-                    pivotIndex = pi;                            
-                }
-
-                void join(const ReduceNextPivotAndUpdate& x)
-                {
-                    if(x.pivotValue > pivotValue)
-                    {
-                        pivotValue = x.pivotValue;
-                        pivotIndex = x.pivotIndex; 
-                    }
-                }                
-            };
-
-            pivotIndex = -1;
-            pivotValue = 0;
-
-            ReduceNextPivotAndUpdate rnpau(diag, tiles, panelDiagIndex, tilesCountHoriz, leadRowBlock);
-
-            parallel_reduce(blocked_range<size_t>(panelDiagIndex, tilesCountVert), rnpau);
-
-            pivotIndex = rnpau.pivotIndex;
-            pivotValue = rnpau.pivotValue;
-
-            if(pivotIndex < 0)
-            {
-                return false;
-            }
-
-            permutations[matrixRow] = pivotIndex;
-
-            if(pivotIndex != matrixRow)
-            {
-                swapRows(matrixRow, pivotIndex);
-            }
-        }
-            
-            // scale rightmost col
-        
-        currentTile = tiles[topTileIndex];
-
-        float divisor = currentTile->tile[(currentTile->tileCols * currentTile->tileRows) - 1];
-        
-        class ApplyScaleRightmost
-        {
-            Tile** tiles;
-            size_t panelDiagIndex;
-            size_t tilesCountHoriz;
-            float divisor;
-
-        public:
-
-            ApplyScaleRightmost
-                (
-                    Tile** argTiles,
-                    size_t argPanelDiagIndex,
-                    size_t argTilesCountHoriz,
-                    float argDivisor
-                ) : 
-                tiles(argTiles),
-                panelDiagIndex(argPanelDiagIndex),
-                tilesCountHoriz(argTilesCountHoriz),
-                divisor(argDivisor)
-            {}
-
-            inline void operator()(const blocked_range<size_t>& workItem) const
-            {
-                size_t start = workItem.begin();
-                size_t stop = workItem.end();
-
-                size_t index = start * tilesCountHoriz + panelDiagIndex;
-
-                for(size_t i = start; i < stop; ++i, index += tilesCountHoriz)
-                {
-                    tiles[index]->scaleRightmost(divisor);
-                }                        
-            }
-        };
-        
-        parallel_for
-        (
-            blocked_range<size_t>(panelDiagIndex + 1, tilesCountVert), 
-            ApplyScaleRightmost(tiles, panelDiagIndex, tilesCountHoriz, divisor)
-        ); 
-
-        return true;
-    }
-
-    /////////////////////////////////////////
     bool factorizePanel(size_t panelDiagIndex, int* permutations)
     {           
         size_t topTileIndex = panelDiagIndex * tilesCountHoriz + panelDiagIndex;
@@ -1108,8 +829,6 @@ struct TiledMatrix
         size_t topRowIndex = panelDiagIndex * tileRows;
 
         permutations[topRowIndex] = pivotIndex;
-
-        printf("[%5.1f %d] ", pivotValue, pivotIndex);
 
         if(pivotIndex != topRowIndex)
         {
@@ -1227,8 +946,6 @@ struct TiledMatrix
 
             permutations[matrixRow] = pivotIndex;
 
-            printf("[%5.1f %d] ", pivotValue, pivotIndex);
-
             if(pivotIndex != matrixRow)
             {
                 swapRowsInPanel(panelDiagIndex, matrixRow, pivotIndex);
@@ -1287,48 +1004,8 @@ struct TiledMatrix
     }
 
     /////////////////////////////////////////
-    void triangleSolve1(size_t panelDiagIndex)
-    {   
-        class Apply
-        {
-            size_t panelDiagIndex;
-            size_t tilesCountHoriz;            
-            Tile** tiles;
-                        
-        public:
-
-            Apply(size_t argPanelDiagIndex, size_t argTilesCountHoriz, Tile** argTiles) :
-
-                panelDiagIndex(argPanelDiagIndex), 
-                tilesCountHoriz(argTilesCountHoriz),                         
-                tiles(argTiles)
-            {}    
-
-            inline void operator()(const blocked_range<size_t>& workItem) const
-            {
-                size_t start = workItem.begin();
-                size_t stop = workItem.end();
-
-                Tile* triTile = tiles[panelDiagIndex * tilesCountHoriz + panelDiagIndex];
-
-                for(size_t i = start, index = panelDiagIndex * tilesCountHoriz + start; i < stop; ++i, ++index)
-                {                    
-                    tiles[index]->solveTriangle(triTile);
-                }
-            }
-        };
-
-        parallel_for
-        (
-            blocked_range<size_t>(panelDiagIndex + 1, tilesCountHoriz), 
-            Apply(panelDiagIndex, tilesCountHoriz, tiles)
-        ); 
-    }
-
-    /////////////////////////////////////////
     void triangleSolve(size_t panelDiagIndex, const int* permutations)
     {   
-        /*
         class Apply
         {
             TiledMatrix* host;
@@ -1387,37 +1064,6 @@ struct TiledMatrix
             blocked_range<size_t>(panelDiagIndex + 1, tilesCountHoriz), 
             Apply(this, panelDiagIndex, tilesCountHoriz, tiles, tileRows, permutations)
         ); 
-        */
-
-        size_t permutStartIndex = panelDiagIndex * tileRows;
-        size_t permutStopIndex = permutStartIndex + tileRows;                
-
-        Tile* triTile = tiles[panelDiagIndex * tilesCountHoriz + panelDiagIndex];
-
-        for(size_t i = panelDiagIndex + 1, index = panelDiagIndex * tilesCountHoriz + panelDiagIndex + 1; i < tilesCountHoriz; ++i, ++index)
-        {   
-            printf("\n%d\n", i);
-
-                // make rows permutations
-            
-            for(size_t rowIndex = permutStartIndex; rowIndex < permutStopIndex; ++rowIndex)
-            {
-                int pi = permutations[rowIndex];
-                                
-                if(pi != rowIndex)
-                {
-                    printf("{%d,%d} ", rowIndex, pi);
-                    swapRowsInPanel(i, rowIndex, pi);
-                }                                        
-            }
-                
-            printf("\n");
-                // 
-            tiles[index]->solveTriangle(triTile);
-
-            printf("Solved %i\n", i);
-//            fgetc(stdin);
-        }        
     }
 
     /////////////////////////////////////////
@@ -1535,104 +1181,6 @@ struct TiledMatrix
 private:
 
     /////////////////////////////////////////
-    void swapRows(size_t r1, size_t r2)
-    {
-        size_t vertIndex1 = r1 / tileRows;
-        size_t vertIndex2 = r2 / tileRows;
-
-        size_t inTileR1 = r1 - vertIndex1 * tileRows;
-        size_t inTileR2 = r2 - vertIndex2 * tileRows;
-
-        size_t index1 = vertIndex1 * tilesCountHoriz;
-        size_t index2 = vertIndex2 * tilesCountHoriz;
-
-        if(vertIndex1 != vertIndex2)
-        {      
-            class Apply
-            {
-                TiledMatrix* host;
-                size_t index1;
-                size_t index2;
-                size_t inTileR1;
-                size_t inTileR2;
-
-            public:
-
-                Apply(TiledMatrix* argHost, size_t argIndex1, size_t argIndex2, size_t argInTileR1, size_t argInTileR2):
-                    host(argHost),
-                    index1(argIndex1),
-                    index2(argIndex2),
-                    inTileR1(argInTileR1),
-                    inTileR2(argInTileR2)                                        
-                {}
-
-                inline void operator()(const blocked_range<size_t>& workItem) const
-                {
-                    size_t start = workItem.begin();
-                    size_t stop = workItem.end();
-
-                    Tile** tiles = host->tiles;
-
-                    for(size_t i = start; i < stop; ++i)
-                    {
-                        host->swapRows(tiles[index1 + i], tiles[index2 + i], inTileR1, inTileR2);
-                    }                        
-                }
-            };         
-
-            parallel_for
-            (
-                blocked_range<size_t>(0, tilesCountHoriz), 
-                Apply(this, index1, index2, inTileR1, inTileR2)
-            ); 
-        }
-        else
-        {   
-            class Apply
-            {
-                Tile** tiles;
-                size_t index;
-                size_t inTileR1;
-                size_t inTileR2;
-
-            public:
-
-                Apply
-                (
-                    Tile** argTiles,
-                    size_t argIndex,
-                    size_t argInTileR1,
-                    size_t argInTileR2                    
-                )
-                    :
-
-                    tiles(argTiles),
-                    index(argIndex),
-                    inTileR1(argInTileR1),
-                    inTileR2(argInTileR2)                                        
-                {}
-
-                inline void operator()(const blocked_range<size_t>& workItem) const
-                {
-                    size_t start = workItem.begin();
-                    size_t stop = workItem.end();
-
-                    for(size_t i = start; i < stop; ++i)
-                    {
-                        tiles[index + i]->swapRows(inTileR1, inTileR2);
-                    }                        
-                }
-            };         
-
-            parallel_for
-            (
-                blocked_range<size_t>(0, tilesCountHoriz), 
-                Apply(tiles, index1, inTileR1, inTileR2)
-            ); 
-        }
-    }    
-
-    /////////////////////////////////////////
     void swapRowsInPanel(size_t panelIndex, size_t r1, size_t r2)
     {        
         size_t vertIndex1 = r1 / tileRows;
@@ -1655,8 +1203,8 @@ private:
             size_t t1stride = t1->tileRows;
             size_t t2stride = t2->tileRows;
 
-            float* pScan1 = t1->tile + r1;
-            float* pScan2 = t2->tile + r2;
+            float* pScan1 = t1->tile + inTileR1;
+            float* pScan2 = t2->tile + inTileR2;
 
             for(size_t i = 0; i < width; ++i, pScan1 += t1stride, pScan2 += t2stride)
             {   
@@ -1670,27 +1218,6 @@ private:
             t1->swapRows(inTileR1, inTileR2);    
         }
     }
-
-    /////////////////////////////////////////
-    void swapRows(Tile* t1, Tile* t2, size_t r1, size_t r2)
-    {
-            // t1 and t2 are in the same 'tile column'
-        
-        size_t width = t1->tileCols;
-
-        size_t t1stride = t1->tileRows;
-        size_t t2stride = t2->tileRows;
-
-        float* pScan1 = t1->tile + r1;
-        float* pScan2 = t2->tile + r2;
-
-        for(size_t i = 0; i < width; ++i, pScan1 += t1stride, pScan2 += t2stride)
-        {            
-            float t = *pScan1;
-            *pScan1 = *pScan2;
-            *pScan2 = t;
-        }                
-    }    
 };
 
 //-------------------------------------------------------------
@@ -1829,7 +1356,7 @@ struct Solver
     /////////////////////////////////////////
     bool Solve()
     {
-        fp32TiledMatrix->printMatrix();   
+        //fp32TiledMatrix->printMatrix();   
 
             // to do: use tilesCount (square matrices)
 
@@ -1841,18 +1368,14 @@ struct Solver
             {                
                 if(step < diagCount - 1)
                 {                    
-                    fp32TiledMatrix->triangleSolve(step, permutations);
-                    //fp32TiledMatrix->triangleSolve(step);
-                    fp32TiledMatrix->updateTrailingSubmatrix(step);     
-                    printf("Done %d\n", step);           
+                    fp32TiledMatrix->triangleSolve(step, permutations);                    
+                    fp32TiledMatrix->updateTrailingSubmatrix(step);                         
                 }
             }
             else
             {
                 return false;
             }
-
-            fp32TiledMatrix->printMatrix();   
         }
 
         fp32TiledMatrix->swapRowsLeft(permutations);
