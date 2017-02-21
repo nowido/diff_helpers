@@ -1121,7 +1121,7 @@ struct TiledMatrix
     }
 
     /////////////////////////////////////////
-    void swapRowsLeft(int* permutations)
+    void swapRowsLeft1(int* permutations)
     {
         for(size_t i = 1, permutStartIndex = tileRows; i < tilesCountVert; ++i, permutStartIndex += tileRows)        
         {
@@ -1142,6 +1142,78 @@ struct TiledMatrix
                     }                        
                 }
             }
+        }
+    }
+    
+    /////////////////////////////////////////
+    void swapRowsLeft(int* permutations)
+    {
+        for(size_t i = 1, permutStartIndex = tileRows; i < tilesCountVert; ++i, permutStartIndex += tileRows)        
+        {
+            size_t permutStopIndex = permutStartIndex + tiles[i * tilesCountHoriz]->tileRows;
+
+            //if(i > 8)
+            {
+                class Apply
+                {
+                    TiledMatrix* host;
+                    int* permutations;
+                    size_t permutStartIndex;
+                    size_t permutStopIndex;    
+
+                public:
+
+                    Apply(TiledMatrix* argHost, int* argPermutations, size_t argPermutStartIndex, size_t argPermutStopIndex) :
+
+                        host(argHost),
+                        permutations(argPermutations),
+                        permutStartIndex(argPermutStartIndex),
+                        permutStopIndex(argPermutStopIndex)
+                    {}    
+
+                    inline void operator()(const blocked_range<size_t>& workItem) const
+                    {
+                        size_t start = workItem.begin();
+                        size_t stop = workItem.end();
+                        
+                        for(size_t j = start; j < stop; ++j)
+                        {
+                            for(size_t rowIndex = permutStartIndex; rowIndex < permutStopIndex; ++rowIndex)
+                            {
+                                int pi = permutations[rowIndex];
+
+                                if(pi != rowIndex)
+                                {
+                                    host->swapRowsInPanel(j, rowIndex, pi);
+                                }                        
+                            }
+                        }                        
+                    }
+                };
+
+                parallel_for
+                (
+                    blocked_range<size_t>(0, i), 
+                    Apply(this, permutations, permutStartIndex, permutStopIndex)
+                ); 
+            }
+            /*
+            else
+            {
+                for(size_t j = 0; j < i; ++j)
+                {
+                    for(size_t rowIndex = permutStartIndex; rowIndex < permutStopIndex; ++rowIndex)
+                    {
+                        int pi = permutations[rowIndex];
+
+                        if(pi != rowIndex)
+                        {
+                            swapRowsInPanel(j, rowIndex, pi);
+                        }                        
+                    }
+                }
+            }
+            */
         }
     }
     
